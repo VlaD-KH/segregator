@@ -1,0 +1,15 @@
+probe/probe_result.txt
+*.env
+.env
+config.toml
+__pycache__/
+*.db
+*.db-wal
+*.db-shm
+archiwum/
+blobs/
+rejestry/
+logs/
+.pytest_cache/
+*.egg-info/
+build/

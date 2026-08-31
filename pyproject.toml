@@ -1,0 +1,26 @@
+[project]
+name = "segregator"
+version = "0.1.0"
+description = "Локальный разбор Telegram-канала «бухгалтерия» в архив: дерево папок, SQLite, XLSX-реестр"
+requires-python = ">=3.12"
+dependencies = [
+    "aiogram>=3.28",
+    "pydantic>=2.12",
+    "pydantic-settings>=2.12",
+    "httpx>=0.28",
+    "typer>=0.25",
+    "structlog>=24.1",
+]
+
+[project.scripts]
+segregator = "segregator.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

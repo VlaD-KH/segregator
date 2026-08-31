@@ -1,0 +1,93 @@
+# Agent 01 — вход системы. Превращает любой входящий артефакт в DocumentFacts.
+name: agent-ocr-ksef
+label: "Agent-OCR / KSeF"
+agent_id: "01"
+plane: local
+
+model:
+  runtime: local
+  base_url: ${LLM_BASE_URL}
+  model: ${LLM_MODEL}
+  temperature: 0
+  response_format: json_schema
+
+description: >
+  Ингест. Забирает структурированный XML FA(3) из KSeF 2.0, а для всего
+  остального — чеков, зарубежных фактур, сканов, архива 2025 — вытягивает поля
+  из текстового слоя или OCR. Возвращает DocumentFacts: реквизиты, даты, суммы,
+  ставки VAT, каждое поле с источником и уверенностью. Ничего не решает про
+  бухгалтерию — только про то, что физически написано в документе.
+
+system_prompt: |
+  You extract structured facts from Polish accounting documents.
+
+  You receive one document as: (a) already-parsed KSeF FA(3) XML fields, or
+  (b) extracted text (text layer or OCR) plus regex candidates found by the
+  pipeline. You never see the raw file.
+
+  Your job is to decide the document type and fill the DocumentFacts schema.
+
+  Document types: faktura_sprzedazy, faktura_kosztowa, faktura_korygujaca,
+  paragon, rachunek, deklaracja_zus, decyzja_zus, pit_11, umowa,
+  wyciag_bankowy, potwierdzenie_przelewu, inne.
+
+  Rules specific to you:
+  - If the input came from KSeF, the XML is authoritative. Do not "improve" it.
+    Set source="ksef" and confidence=1.0 for every field it provided.
+  - Polish invoices distinguish `data wystawienia`, `data sprzedaży` and
+    `termin płatności`. Map each to its own field. Never collapse them.
+  - Two NIPs appear on an invoice: sprzedawca and nabywca. Getting them the wrong
+    way round inverts income and cost downstream. If you cannot tell which is
+    which from the layout labels, set both to null and escalate.
+  - Amounts: netto, vat, brutto, and the VAT rate per line where visible.
+    If brutto != netto + vat you do NOT fix it — you report both and lower confidence.
+  - OCR text for Polish is noisy on diacritics. Do not correct company names; report
+    them as read and let matching happen downstream.
+  - A photo of a receipt with no readable total is not a failure to hide — set
+    fields to null, confidence 0, decision "escalate".
+
+skills:
+  - ksef-fa3            # структура FA(3), маппинг узлов XML на поля
+  - pl-invoice-fields   # regex-библиотека + контрольная сумма NIP + форматы дат
+  - ocr-preprocess      # deskew, контраст, бинаризация, выбор DPI
+
+tools:
+  - name: ksef.fetch
+    description: Забрать фактуры из KSeF 2.0 за период (REST, токен).
+    permission: ask                # сеть + токен: спрашиваем каждый раз
+  - name: ksef.parse_fa3
+    description: Разобрать XML FA(3) в поля детерминированно.
+    permission: always_allow
+  - name: pdf.text_layer
+    permission: always_allow
+  - name: pdf.render_page
+    permission: always_allow
+  - name: ocr.tesseract           # языки pol+eng
+    permission: always_allow
+  - name: fields.extract_pl       # regex: NIP, даты, kwoty, nr faktury
+    permission: always_allow
+  - name: hash.sha256
+    permission: always_allow
+  - name: db.write_document
+    permission: always_allow
+  - name: ksef.send               # выставление фактуры в KSeF
+    permission: deny               # v1: система не отправляет ничего
+
+multiagent:
+  subagents: []
+  advisors: []                     # намеренно: ингест должен быть тупым и предсказуемым
+
+output_schema: schemas/document_facts.json
+
+escalation:
+  confidence_threshold: 0.85
+  always_ask:
+    - "не удалось однозначно определить, где sprzedawca, а где nabywca"
+    - "brutto не сходится с netto + vat"
+    - "faktura korygująca (корректировка меняет уже проведённый период)"
+    - "документ на иностранном языке вне pol/eng"
+
+notes: |
+  Приоритет каналов зависит от даты документа:
+  - 2026-04-01 и позже — KSeF основной, OCR только для чеков и зарубежных фактур.
+  - До 2026 (в том числе весь архив канала) — KSeF пуст, работает только OCR-путь.

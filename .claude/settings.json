@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(//C:/Users/Huawei/Downloads/**)",
+      "Read(./archiwum/**)",
+      "Read(./blobs/**)",
+      "Read(./rejestry/**)",
+      "Read(./logs/**)",
+      "Read(./*.db)",
+      "Read(./.env)",
+      "Bash(curl:*)",
+      "Bash(wget:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(pip install:*)",
+      "Bash(ollama pull:*)"
+    ],
+    "allow": [
+      "Read(./src/**)",
+      "Read(./agents/**)",
+      "Read(./rules/**)",
+      "Read(./schemas/**)",
+      "Read(./tests/**)",
+      "Read(./docs/**)",
+      "Edit(./src/**)",
+      "Edit(./agents/**)",
+      "Edit(./rules/**)",
+      "Edit(./tests/**)",
+      "Bash(pytest:*)",
+      "Bash(python -m pytest:*)"
+    ]
+  }
+}

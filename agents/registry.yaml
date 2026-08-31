@@ -1,0 +1,36 @@
+# Реестр доменных агентов (плоскость L — локальный рантайм).
+# Оркестратор читает этот файл на старте. Порядок = порядок в конвейере.
+version: 1
+runtime:
+  plane: local
+  llm:
+    backend: ${LLM_BACKEND}        # llama.cpp | ollama
+    base_url: ${LLM_BASE_URL}      # OpenAI-совместимый эндпоинт, только localhost
+    model: ${LLM_MODEL}            # подбирается после probe_result.txt, класс 4B GGUF Q4_K_M
+    temperature: 0
+    max_tokens: 768
+    keep_alive_seconds: 600        # выгрузка модели в IDLE
+  contracts_dir: agents/schemas
+  audit_log: logs/audit.ndjson     # append-only, ślad rewizyjny
+
+# Инварианты, которые оркестратор внедряет в системный промпт КАЖДОГО агента.
+# Менять только вместе с docs/DATA_BOUNDARY.md.
+global_invariants: prompts/_invariants.md
+
+agents:
+  - id: "01"
+    name: agent-ocr-ksef
+    spec: 01_ocr_ksef.yaml
+  - id: "02"
+    name: agent-ksiegowy
+    spec: 02_ksiegowy.yaml
+  - id: "03"
+    name: agent-kadrowy
+    spec: 03_kadrowy.yaml
+  - id: "04"
+    name: agent-doradca
+    spec: 04_doradca.yaml
+
+interface:
+  name: segregator-bot
+  spec: 00_bot.yaml

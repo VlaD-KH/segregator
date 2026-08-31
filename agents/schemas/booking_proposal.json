@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BookingProposal",
+  "type": "object",
+  "required": ["category","confidence","basis","decision"],
+  "properties": {
+    "category": {"type": "string"},
+    "subcategory": {"type": ["string","null"]},
+    "kpir_column": {"type": ["integer","null"], "description": "null при ryczałt"},
+    "account": {"type": ["string","null"], "description": "план счетов, только Sp. z o.o."},
+    "vat_rate": {"type": ["number","null"]},
+    "vat_deduction_ratio": {"type": ["number","null"], "enum": [0, 0.5, 1, null]},
+    "pit_cost_ratio": {"type": ["number","null"], "enum": [0, 0.75, 1, null]},
+    "period_date": {"type": ["string","null"], "format": "date"},
+    "period_date_basis": {"type": "string","enum": ["data_wystawienia","data_sprzedazy","data_platnosci","data_wiadomosci"]},
+    "confidence": {"type": "number","minimum": 0,"maximum": 1},
+    "basis": {"type": "string","description": "precedent:<id> | rule:<id> | llm"},
+    "decision": {"type": "string","enum": ["ok","escalate"]},
+    "why": {"type": "string","maxLength": 300}
+  },
+  "additionalProperties": false
+}

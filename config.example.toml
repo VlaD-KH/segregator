@@ -1,0 +1,28 @@
+# Структурные настройки (без секретов). Скопировать в config.toml.
+# Секреты и пути — в .env, не здесь.
+
+[firma]
+nip = ""  # заполнить перед Э3 (регекс-экстрактор NIP сверяет контрольную сумму)
+
+[thresholds]
+default = 0.85
+
+[thresholds.overrides]
+# У podatki и zus ошибка дороже — порог выше; у bank — ниже.
+# podatki = 0.95
+# zus = 0.95
+# bank = 0.75
+
+[tree]
+years = [2025]
+# Заглушка до Э0 (разведка экспорта и утверждение окончательного списка).
+categories = [
+    "przychody",
+    "koszty",
+    "zus",
+    "podatki",
+    "pit-11",
+    "umowy",
+    "bank",
+    "do-wyjasnienia",
+]

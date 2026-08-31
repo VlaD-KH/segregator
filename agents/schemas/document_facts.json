@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DocumentFacts",
+  "type": "object",
+  "required": ["doc_type", "fields", "decision"],
+  "properties": {
+    "doc_type": {
+      "type": "string",
+      "enum": ["faktura_sprzedazy","faktura_kosztowa","faktura_korygujaca","paragon",
+               "rachunek","deklaracja_zus","decyzja_zus","pit_11","umowa",
+               "wyciag_bankowy","potwierdzenie_przelewu","inne"]
+    },
+    "fields": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["value","source","confidence"],
+        "properties": {
+          "value": {"type": ["string","number","null"]},
+          "source": {"type": "string","enum": ["ksef","xml","text","ocr","regex","llm","human"]},
+          "confidence": {"type": "number","minimum": 0,"maximum": 1}
+        }
+      },
+      "description": "nip_sprzedawcy, nip_nabywcy, nazwa_sprzedawcy, nazwa_nabywcy, nr_dokumentu, data_wystawienia, data_sprzedazy, termin_platnosci, netto, vat, brutto, stawka_vat, waluta"
+    },
+    "decision": {"type": "string","enum": ["ok","escalate"]},
+    "why": {"type": "string","maxLength": 300}
+  },
+  "additionalProperties": false
+}

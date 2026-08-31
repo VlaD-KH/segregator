@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PayrollFacts",
+  "type": "object",
+  "required": ["periods","decision"],
+  "properties": {
+    "periods": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["from","to","kind","source"],
+        "properties": {
+          "from": {"type": "string","format": "date"},
+          "to": {"type": "string","format": "date"},
+          "kind": {"type": "string","enum": ["uop","uz","jdg","brak"]},
+          "payer_nip": {"type": ["string","null"]},
+          "gross": {"type": ["number","null"]},
+          "kup": {"type": ["number","null"]},
+          "advance_withheld": {"type": ["number","null"]},
+          "source": {"type": "string","enum": ["pit_11","profile","human"]}
+        }
+      }
+    },
+    "zus_stage_by_month": {
+      "type": "object",
+      "additionalProperties": {"type": "string","enum": ["ulga_na_start","preferencyjny","maly_zus_plus","duzy_zus","brak"]}
+    },
+    "zbieg_tytulow": {"type": ["boolean","null"]},
+    "decision": {"type": "string","enum": ["ok","escalate"]},
+    "why": {"type": "string","maxLength": 300}
+  },
+  "additionalProperties": false
+}
