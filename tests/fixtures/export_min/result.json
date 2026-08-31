@@ -1,0 +1,82 @@
+{
+  "name": "ksiegowosc-test",
+  "type": "public_channel",
+  "id": 1900000001,
+  "messages": [
+    {
+      "id": 1,
+      "type": "message",
+      "date": "2025-01-14T10:12:00",
+      "date_unixtime": "1736849520",
+      "from": "ksiegowosc-test",
+      "from_id": "channel1900000001",
+      "file": "files/doc_a.pdf",
+      "file_name": "faktura-a.pdf",
+      "mime_type": "application/pdf",
+      "text": "faktura styczen",
+      "text_entities": [{ "type": "plain", "text": "faktura styczen" }]
+    },
+    {
+      "id": 2,
+      "type": "service",
+      "date": "2025-01-14T10:13:00",
+      "date_unixtime": "1736849580",
+      "actor": "ksiegowosc-test",
+      "action": "pin_message",
+      "text": "",
+      "text_entities": []
+    },
+    {
+      "id": 3,
+      "type": "message",
+      "date": "2025-02-03T09:00:00",
+      "date_unixtime": "1738569600",
+      "from": "ksiegowosc-test",
+      "from_id": "channel1900000001",
+      "photo": "photos/photo_1.jpg",
+      "width": 1200,
+      "height": 1600,
+      "text": "paragon",
+      "text_entities": [{ "type": "plain", "text": "paragon" }]
+    },
+    {
+      "id": 4,
+      "type": "message",
+      "date": "2025-02-10T14:30:00",
+      "date_unixtime": "1739197800",
+      "from": "ksiegowosc-test",
+      "from_id": "channel1900000001",
+      "file": "files/doc_a.pdf",
+      "file_name": "faktura-a-ponownie.pdf",
+      "mime_type": "application/pdf",
+      "text": "ta sama faktura jeszcze raz",
+      "text_entities": [{ "type": "plain", "text": "ta sama faktura jeszcze raz" }]
+    },
+    {
+      "id": 5,
+      "type": "message",
+      "date": "2025-03-01T08:00:00",
+      "date_unixtime": "1740816000",
+      "from": "ksiegowosc-test",
+      "from_id": "channel1900000001",
+      "file": "files/brakujacy.pdf",
+      "file_name": "brakujacy.pdf",
+      "mime_type": "application/pdf",
+      "text": "plik ktorego nie ma na dysku",
+      "text_entities": [{ "type": "plain", "text": "plik ktorego nie ma na dysku" }]
+    },
+    {
+      "id": 6,
+      "type": "message",
+      "date": "2025-03-15T16:45:00",
+      "date_unixtime": "1742057100",
+      "from": "ksiegowosc-test",
+      "from_id": "channel1900000001",
+      "file": "files/doc_b.pdf",
+      "file_name": "faktura-b.pdf",
+      "mime_type": "application/pdf",
+      "text": "faktura marzec",
+      "text_entities": [{ "type": "plain", "text": "faktura marzec" }]
+    }
+  ]
+}

@@ -1,1 +1,18 @@
-{}
+{
+  "export_min/result.json": {
+    "synthetic": true,
+    "note": "Выдуманный экспорт Telegram Desktop: 5 сообщений + 1 служебное. Ни одного настоящего документа, контрагента или NIP."
+  },
+  "export_min/files/doc_a.pdf": {
+    "synthetic": true,
+    "note": "Не PDF, а текстовая заглушка с PDF-сигнатурой. Referenced дважды — проверяет дедупликацию."
+  },
+  "export_min/files/doc_b.pdf": {
+    "synthetic": true,
+    "note": "Текстовая заглушка с PDF-сигнатурой."
+  },
+  "export_min/photos/photo_1.jpg": {
+    "synthetic": true,
+    "note": "Текстовая заглушка с JPEG-сигнатурой."
+  }
+}

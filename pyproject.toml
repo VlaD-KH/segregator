@@ -10,6 +10,8 @@ dependencies = [
     "httpx>=0.28",
     "typer>=0.25",
     "structlog>=24.1",
+    # Потоковый разбор result.json: экспорт за год не обязан влезать в память.
+    "ijson>=3.5",
 ]
 
 [project.scripts]
