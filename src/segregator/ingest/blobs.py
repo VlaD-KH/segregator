@@ -26,11 +26,22 @@ class BlobRef:
 
 
 def sha256_of(path: Path) -> str:
-    """Посчитать sha256 файла, не загружая его целиком в память."""
+    """Посчитать sha256 файла, не загружая его целиком в память.
+
+    Ошибки файловой системы переписываются: `open()` вкладывает в текст
+    `OSError` полный путь (`[Errno 2] No such file or directory: 'C:/…/
+    tajna-faktura.pdf'`), а `normalize._ingest_attachment` зовёт эту функцию
+    напрямую в сухом прогоне — путь уехал бы в stderr вместе с именем
+    документа. Инвариант в тестах такое не ловит: `raise` тут не наш.
+    """
     digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        while chunk := fh.read(_CHUNK):
-            digest.update(chunk)
+    try:
+        with path.open("rb") as fh:
+            while chunk := fh.read(_CHUNK):
+                digest.update(chunk)
+    except OSError as error:
+        reason = type(error).__name__
+        raise FileNotFoundError(f"Не прочитан файл вложения: {reason}") from None
     return digest.hexdigest()
 
 
@@ -47,7 +58,7 @@ def store_blob(archive_dir: Path, source: Path) -> BlobRef:
     """Положить файл в хранилище. Идемпотентно по содержимому."""
     if not source.is_file():
         # Путь к документу в текст не выносим — исключение попадает в stderr
-        # и в переписку при отладке (docs/DATA_BOUNDARY.md, инвариант 4).
+        # и в переписку при отладке (docs/DATA_BOUNDARY.md, инвариант 1).
         raise FileNotFoundError("Файл вложения не найден на диске")
 
     digest = sha256_of(source)

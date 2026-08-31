@@ -151,7 +151,7 @@ def _sent_at(node, message_id: int) -> str:
     match = _DATE_RE.search(title or "")
     if not match:
         # Строку даты в текст не выносим: она из экспорта, а исключение уходит
-        # в stderr и в переписку при отладке (docs/DATA_BOUNDARY.md, инвариант 4).
+        # в stderr и в переписку при отладке (docs/DATA_BOUNDARY.md, инвариант 1).
         raise ValueError(
             f"Не разобрана дата сообщения {message_id}: формат не совпал с ожидаемым"
         )
@@ -200,7 +200,22 @@ def _resolve_inside(export_dir: Path, relative: str) -> Path:
     """
     decoded = unquote(relative)
     root = export_dir.resolve()
-    candidate = (root / decoded).resolve()
+    try:
+        candidate = (root / decoded).resolve()
+    except (OSError, ValueError) as error:
+        # `resolve()` ходит в файловую систему и на враждебном вводе падает не
+        # только «не найдено»: `%00` после декодирования даёт NUL в пути и
+        # `ValueError: embedded null character`, слишком длинный путь на NTFS —
+        # `OSError`. Голое исключение отсюда прошло бы мимо ExportPathError,
+        # мимо обработчиков в cli.backfill и убило бы весь прогон, а его
+        # traceback вынес бы наружу декодированное имя файла.
+        # Контракт функции: либо безопасный путь внутри корня, либо
+        # ExportPathError. Причину не прикладываем (`from None`) — сообщение
+        # системы содержит сам путь.
+        reason = type(error).__name__
+        raise ExportPathError(
+            f"Путь вложения не удалось разобрать: {reason}"
+        ) from None
     if not candidate.is_relative_to(root):
         # Сам путь в текст не выносим — это имя файла из экспорта.
         raise ExportPathError("Путь вложения ведёт за пределы корня экспорта")
