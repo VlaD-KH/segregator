@@ -56,6 +56,43 @@ def init() -> None:
     log.info("init.completed", migrations_applied=len(applied), dirs_created=len(created))
 
 
+@app.command()
+def backfill(
+    dry_run: bool = typer.Option(False, "--dry-run", help="Посчитать, но ничего не записывать"),
+    limit: int | None = typer.Option(None, "--limit", help="Разобрать только первые N сообщений"),
+) -> None:
+    """Разобрать исторический экспорт Telegram Desktop в архив."""
+    from segregator.ingest.export_reader import ExportPathError
+    from segregator.ingest.normalize import backfill as run_backfill
+
+    settings = _load_settings_or_exit()
+    slog.configure_logging(settings.archive_dir / "logs")
+
+    try:
+        stats = run_backfill(
+            settings.archive_dir,
+            settings.export_dir,
+            dry_run=dry_run,
+            limit=limit,
+        )
+    except FileNotFoundError as error:
+        typer.echo(f"Экспорт не найден: {error}")
+        raise typer.Exit(code=1)
+    except ExportPathError as error:
+        # Путь из данных увёл за пределы экспорта — это не «плохой файл»,
+        # а повод остановиться и посмотреть, что за экспорт нам подсунули.
+        typer.echo(f"Экспорт отклонён: {error}")
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Сообщений:  добавлено {stats.messages_added}, уже было {stats.messages_skipped}")
+    typer.echo(f"Вложений:   добавлено {stats.attachments_added}, уже было {stats.attachments_skipped}")
+    typer.echo(f"Блобов:     новых {stats.blobs_new}, дублей {stats.blobs_deduped}")
+    if stats.missing_files:
+        typer.echo(f"Пропущено:  {stats.missing_files} вложений не найдено на диске")
+    if dry_run:
+        typer.echo("Сухой прогон — ничего не записано.")
+
+
 def _check_tesseract() -> tuple[bool, str, str]:
     path = shutil.which("tesseract")
     if path:
