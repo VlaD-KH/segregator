@@ -17,6 +17,12 @@ dependencies = [
     "beautifulsoup4>=4.12",
 ]
 
+[project.optional-dependencies]
+# Тестовое окружение: `pip install -e ".[dev]"`. Без этого свежий клон
+# не соберёт pytest, и приёмка проекта («проверяется тестами, а не глазами»)
+# недоступна на чистой машине.
+dev = ["pytest>=9.0"]
+
 [project.scripts]
 segregator = "segregator.cli:app"
 
