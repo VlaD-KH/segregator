@@ -6,9 +6,9 @@
 ## Компоненты и зависимости
 
 ```
-config.Settings ─┐
-db.get_connection├─► ingest.normalize ◄── ingest.export_reader ◄── result.json
-paths.ensure_tree┘         │                      (ijson, потоково)
+config.Settings ─┐                       ┌── ingest.export_reader ◄── result.json (ijson)
+db.get_connection├─► ingest.normalize ◄──┤   ingest.html_reader   ◄── messages*.html (bs4)
+paths.ensure_tree┘         │             └── ingest.export (выбор формата по каталогу)
                            ▼
                     ingest.blobs (sha256, content-addressed)
                            │
@@ -16,15 +16,17 @@ paths.ensure_tree┘         │                      (ijson, потоково)
                     cli.backfill (--dry-run, --limit)
 ```
 
-Порядок обязателен: `blobs` не зависит ни от чего, `export_reader` не зависит
-от БД, `normalize` связывает оба, CLI — сверху. Поэтому Т1 и Т2 независимы и
-могли бы идти параллельно; Т3 требует обеих; Т4 требует Т3.
+Порядок обязателен: `blobs` не зависит ни от чего, читатели не зависят
+от БД, `normalize` связывает всё через `ingest.export` (слой выбора формата),
+CLI — сверху. Т1 и Т2 независимы; Т3 требует обеих; Т4 требует Т3; Т5
+(HTML-читатель + слой выбора) требует Т3 и переиспользует `normalize`/`blobs`
+без правок.
 
 ## Риски и что с ними делаем
 
 | Риск | Митигация |
 |---|---|
-| Формат экспорта окажется HTML, а не JSON | Разработка идёт против синтетической фикстуры; читатель изолирован в одном модуле, замена парсера не трогает normalize/blobs |
+| ~~Формат экспорта окажется HTML~~ — подтверждено Э0: экспорт **в HTML** | Т5: `html_reader.py` + `ingest.export` (слой выбора). `normalize`/`blobs`/`cli` не тронуты, `export_reader.py` (JSON) оставлен как есть |
 | Путь вложения из данных уводит запись за корень экспорта | Т2: резолв + проверка `is_relative_to`, отдельный тест |
 | Прерванный прогон оставляет обрезанный блоб | Т1: запись через `.part` + атомарный `replace()` |
 | Огромный `result.json` не влезает в память | Т2: `ijson.items(f, "messages.item")`, никогда `json.load` |
@@ -74,6 +76,20 @@ paths.ensure_tree┘         │                      (ijson, потоково)
   без имён файлов и содержимого.
 - Verify: `python -m pytest tests/ -v` (полный прогон, 17 старых + новые)
 - Зависит от: Т3
+
+### Т5 — HTML-экспорт: читатель + выбор формата
+Реальный экспорт канала — в HTML (`messages*.html`), не JSON. Читатель
+изолирован, `normalize`/`blobs`/`cli` не меняются.
+- Файлы: `src/segregator/ingest/html_reader.py`, `src/segregator/ingest/export.py`
+  (новые), `src/segregator/ingest/normalize.py` (одна строка импорта),
+  `pyproject.toml` (+`beautifulsoup4`), `tests/fixtures/export_html/`,
+  `tests/fixtures/manifest.json`, `tests/test_ingest_html_reader.py`,
+  `tests/test_ingest_export_dispatch.py`, `tests/test_ingest_backfill_html.py`
+- Acceptance: `SPEC.md` Success Criteria 1–8 доказаны и на `export_html/`;
+  `ingest.export` выбирает читатель по каталогу; JSON-путь и все прежние
+  тесты Э2 зелёные без правок ассертов.
+- Verify: `python -m pytest tests/ -v`
+- Зависит от: Т3 (переиспользует `normalize`, `blobs`)
 
 ## Что вне плана
 

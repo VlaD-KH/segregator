@@ -30,6 +30,18 @@
   - Verify: `python -m pytest tests/ -v` → 48 passed
   - Files: `src/segregator/cli.py`, `tests/test_cli_backfill.py`
 
+- [ ] **Т5 — HTML-экспорт: читатель + выбор формата**
+  - Реальный экспорт канала в HTML (`messages*.html`), не JSON — подтверждено Э0
+  - Acceptance: `SPEC.md` Success Criteria 1–8 доказаны и на `export_html/`;
+    `ingest.export` выбирает читатель по каталогу; JSON-путь и прежние тесты
+    Э2 зелёные без правок ассертов
+  - Verify: `python -m pytest tests/ -v`
+  - Files: `src/segregator/ingest/html_reader.py`, `src/segregator/ingest/export.py`,
+    `src/segregator/ingest/normalize.py`, `pyproject.toml` (+`beautifulsoup4`),
+    `tests/fixtures/export_html/`, `tests/test_ingest_html_reader.py`,
+    `tests/test_ingest_export_dispatch.py`, `tests/test_ingest_backfill_html.py`
+  - Прогон: `20260831-084236-2-html-telegram-desktop`
+
 ## Найдено и починено по ходу
 
 - **Сухой прогон врал про дедупликацию.** `--dry-run` показывал «новых 4»,
