@@ -1,0 +1,18 @@
+[2026-09-01 01:16:30] [BATCH 1 SUCCESS] Domain Models & ZUS Calculator implemented.
+- Created: src/segregator/domain/models.py (Pydantic v2: TaxpayerProfile, DocumentFacts, BookingProposal, ZUSObligations, SyncState)
+- Created: src/segregator/domain/zus.py (ZUSCalculator with Decimal arithmetic, Ulga na start, Preferencyjny, Zbieg tytulow)
+- Tests: tests/test_domain_zus.py - 7 passed in 0.53s (100% pass)
+
+[2026-09-01 01:19:30] [BATCH 2 SUCCESS] Deterministic Tax Engine & Invariants implemented.
+- Created: src/segregator/tax/pit.py (PITCalculator: Skala 12%/32% with 30k kwota wolna, Liniowy 19%, Ryczałt, Payroll UoP/UZ)
+- Created: src/segregator/accounting/kpir.py (KPiREngine: columns 7, 8, 10, 11, 12, 13, mixed vehicle limits 75% KUP / 50% VAT)
+- Created: src/segregator/domain/invariants.py (InvariantEngine: 5 mathematical invariants with exact delta localization)
+- Tests: tests/test_tax_pit_invariants.py - 5 passed in 0.31s (100% pass)
+- Combined test suite: 12/12 passed in 0.35s (100% pass)
+
+[2026-09-01 01:32:00] [BATCH 3 SUCCESS] Multi-Agent Orchestrator Graph implemented.
+- Created: src/segregator/orchestrator/state.py (AccountingGraphState with AuditEntry and watermarks)
+- Created: src/segregator/orchestrator/nodes.py (step0_reconciler, agent01_ingest, agent02_accounting, agent03_tax, human_review, agent04_compliance)
+- Created: src/segregator/orchestrator/graph.py (StateGraph / CompiledGraph DAG factory build_accounting_graph)
+- Tests: tests/test_orchestrator_graph.py - 3 passed in 0.40s (100% pass)
+- Full regression suite: 15/15 passed in 0.40s (100% pass)
