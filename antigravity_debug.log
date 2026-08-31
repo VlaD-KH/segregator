@@ -16,3 +16,9 @@
 - Created: src/segregator/orchestrator/graph.py (StateGraph / CompiledGraph DAG factory build_accounting_graph)
 - Tests: tests/test_orchestrator_graph.py - 3 passed in 0.40s (100% pass)
 - Full regression suite: 15/15 passed in 0.40s (100% pass)
+
+[2026-09-01 01:51:30] [BATCH 4 SUCCESS] 2025 Transition Case & PIT-36 Consolidation implemented.
+- Created: src/segregator/compliance/pit36.py (PIT36Consolidator, PITBAttachment, IncomeSourceRecord, PIT36Declaration)
+- Tests: tests/test_transition_case_2025.py - 1 passed in 0.38s (100% pass)
+- Full project regression test suite: 91/91 passed in 9.15s (100% pass)
+- Git Branch: feat/agent-business-logic on https://github.com/VlaD-KH/segregator.git
