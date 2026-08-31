@@ -119,9 +119,9 @@ def _resolve_inside(export_dir: Path, relative: str) -> Path:
     root = export_dir.resolve()
     candidate = (root / relative).resolve()
     if not candidate.is_relative_to(root):
-        raise ExportPathError(
-            f"Путь вложения уводит за пределы экспорта: {relative!r}"
-        )
+        # Сам путь в текст не выносим — это имя файла из экспорта
+        # (docs/DATA_BOUNDARY.md, инвариант 4).
+        raise ExportPathError("Путь вложения ведёт за пределы корня экспорта")
     return candidate
 
 
