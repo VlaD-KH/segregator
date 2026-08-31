@@ -24,6 +24,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
+from urllib.parse import unquote
 
 from bs4 import BeautifulSoup
 
@@ -130,7 +131,7 @@ def _to_raw_message(node, export_dir: Path) -> RawMessage | None:
 
     return RawMessage(
         message_id=message_id,
-        sent_at=_sent_at(node),
+        sent_at=_sent_at(node, message_id),
         author=_text_of(node.select_one(".from_name")),
         body=_text_of(node.select_one("div.text")),
         attachments=attachments,
@@ -144,12 +145,16 @@ def _message_id(node) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _sent_at(node) -> str:
+def _sent_at(node, message_id: int) -> str:
     date_node = node.select_one(".date[title]")
     title = date_node.get("title") if date_node else None
     match = _DATE_RE.search(title or "")
     if not match:
-        raise ValueError(f"Не разобрана дата сообщения: {title!r}")
+        # Строку даты в текст не выносим: она из экспорта, а исключение уходит
+        # в stderr и в переписку при отладке (docs/DATA_BOUNDARY.md, инвариант 4).
+        raise ValueError(
+            f"Не разобрана дата сообщения {message_id}: формат не совпал с ожидаемым"
+        )
 
     g = match.groupdict()
     offset_minutes = int(g["oh"]) * 60 + int(g["om"])
@@ -183,11 +188,17 @@ def _resolve_inside(export_dir: Path, relative: str) -> Path:
 
     Та же защита, что и в JSON-читателе: href приходит из данных и управляем
     не нами.
+
+    href в HTML-экспорте процентно-кодирован (Telegram так пишет имена с
+    пробелами и не-ASCII: `files/faktura%20nr%201.pdf`). Декодируем ДО резолва,
+    иначе путь с литеральным `%20` не найдёт файл и вложение тихо уйдёт в
+    «не найдено». Порядок важен: decode → resolve → проверка выхода за корень;
+    `resolve()` нормализует `..`, так что `%2e%2e%2f` защиту не обходит.
     """
+    decoded = unquote(relative)
     root = export_dir.resolve()
-    candidate = (root / relative).resolve()
+    candidate = (root / decoded).resolve()
     if not candidate.is_relative_to(root):
-        raise ExportPathError(
-            f"Путь вложения уводит за пределы экспорта: {relative!r}"
-        )
+        # Сам путь в текст не выносим — это имя файла из экспорта.
+        raise ExportPathError("Путь вложения ведёт за пределы корня экспорта")
     return candidate

@@ -46,7 +46,9 @@ def blob_relative_path(sha256: str, suffix: str) -> Path:
 def store_blob(archive_dir: Path, source: Path) -> BlobRef:
     """Положить файл в хранилище. Идемпотентно по содержимому."""
     if not source.is_file():
-        raise FileNotFoundError(f"Файл вложения не найден: {source}")
+        # Путь к документу в текст не выносим — исключение попадает в stderr
+        # и в переписку при отладке (docs/DATA_BOUNDARY.md, инвариант 4).
+        raise FileNotFoundError("Файл вложения не найден на диске")
 
     digest = sha256_of(source)
     target = Path(archive_dir) / blob_relative_path(digest, source.suffix)
