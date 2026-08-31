@@ -17,3 +17,4 @@ JDG/
 ChatExport_*/
 messages*.html
 probe/probe_result_html.txt
+!tests/fixtures/**/messages*.html
