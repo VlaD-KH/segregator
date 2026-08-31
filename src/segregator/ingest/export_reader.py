@@ -123,23 +123,52 @@ def _resolve_inside(export_dir: Path, relative: str) -> Path:
     значило бы испортить имя файла, в котором стоит настоящий знак процента.
     """
     root = export_dir.resolve()
-    candidate = (root / relative).resolve()
+    try:
+        candidate = (root / relative).resolve()
+    except (OSError, ValueError) as error:
+        # `resolve()` ходит в файловую систему и на враждебном вводе падает не
+        # только «не найдено»: JSON умеет нести `"file": "a\x00.pdf"`, и NUL
+        # в пути даёт `ValueError: embedded null character`; слишком длинный
+        # путь на NTFS — `OSError`. Голое исключение отсюда прошло бы мимо
+        # ExportPathError и мимо обработчиков в cli.backfill, убив весь прогон,
+        # а его traceback вынес бы наружу имя файла. Контракт функции: либо
+        # безопасный путь внутри корня, либо ExportPathError. Причину не
+        # прикладываем (`from None`) — сообщение системы содержит сам путь.
+        reason = type(error).__name__
+        raise ExportPathError(
+            f"Путь вложения не удалось разобрать: {reason}"
+        ) from None
     if not candidate.is_relative_to(root):
         # Сам путь в текст не выносим — это имя файла из экспорта
-        # (docs/DATA_BOUNDARY.md, инвариант 4).
+        # (docs/DATA_BOUNDARY.md, инвариант 1).
         raise ExportPathError("Путь вложения ведёт за пределы корня экспорта")
     return candidate
 
 
 def _to_iso_utc(item: dict) -> str:
+    # Идентификатор связываем отдельно: в текст исключения попадает только он,
+    # а не `item` — весь сырой словарь сообщения с текстом и контрагентом.
+    # Инвариант в тестах разрешает в `raise` строго перечисленные имена.
+    message_id = item.get("id")
     unixtime = item.get("date_unixtime")
     if unixtime is not None:
         return datetime.fromtimestamp(int(unixtime), tz=timezone.utc).isoformat()
     # Запасной путь: "date" без зоны — трактуем как UTC, чтобы поле не пустовало.
     raw_date = item.get("date")
     if raw_date:
-        return datetime.fromisoformat(raw_date).replace(tzinfo=timezone.utc).isoformat()
-    raise ValueError(f"У сообщения {item.get('id')} нет ни date_unixtime, ни date")
+        try:
+            return datetime.fromisoformat(raw_date).replace(tzinfo=timezone.utc).isoformat()
+        except (TypeError, ValueError):
+            # `fromisoformat` вкладывает разобранную строку прямо в текст
+            # ошибки: `Invalid isoformat string: 'FAKTURA-KOWALSKI-2025'`.
+            # Это поле документа, и отсюда оно уехало бы в stderr и в
+            # переписку. Тот же дефект, что чинился в `html_reader._sent_at`;
+            # JSON-ветка его сохраняла.
+            raise ValueError(
+                f"Не разобрана дата сообщения {message_id}: "
+                "формат не совпал с ожидаемым"
+            ) from None
+    raise ValueError(f"У сообщения {message_id} нет ни date_unixtime, ни date")
 
 
 def _to_text(item: dict) -> str | None:

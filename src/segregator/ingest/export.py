@@ -18,6 +18,7 @@ from typing import Iterator
 
 from segregator.ingest import export_reader, html_reader
 from segregator.ingest.export_reader import (
+    RESULT_JSON,
     ExportPathError,
     RawAttachment,
     RawMessage,
@@ -51,7 +52,7 @@ def detect_format(export_dir: Path) -> str:
         # конфига — этого хватает, чтобы понять, что чинить.
         raise FileNotFoundError("Каталог экспорта не найден — проверь EXPORT_DIR")
 
-    if (export_dir / export_reader.RESULT_JSON).is_file():
+    if (export_dir / RESULT_JSON).is_file():
         return JSON
     if any(
         p.is_file() and html_reader.PAGE_RE.match(p.name)
@@ -60,7 +61,7 @@ def detect_format(export_dir: Path) -> str:
         return HTML
 
     raise FileNotFoundError(
-        f"В каталоге EXPORT_DIR нет ни {export_reader.RESULT_JSON}, "
+        f"В каталоге EXPORT_DIR нет ни {RESULT_JSON}, "
         "ни messages*.html — не похоже на экспорт Telegram Desktop."
     )
 

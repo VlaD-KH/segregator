@@ -1,14 +1,16 @@
 """Дефект D2: текст исключения не должен нести содержимое экспорта.
 
-Исключения из `ingest/` уходят в stderr и в вывод CLI (`cli.py`:
-`Экспорт отклонён: {error}`), а оттуда — в переписку при отладке. Это тот
-самый канал, который `docs/DATA_BOUNDARY.md` инвариант 4 закрывает: наружу
-идут идентификаторы, категории и счётчики — не имена файлов, не тексты,
-не сырые поля документа.
+Исключения из конвейера уходят в stderr и в вывод CLI (`cli.py`:
+`Экспорт отклонён: {error}`), а оттуда — в переписку при отладке.
+
+Правило берётся из `docs/DATA_BOUNDARY.md`, **инвариант 1**: «Ни один байт
+содержимого документа не уходит в облако. Ни в переписку, …». Инвариант 4
+(«Логи содержат идентификаторы…») здесь ни при чём — он про логгер;
+ранняя редакция этих комментариев ссылалась на него ошибочно.
 
 Тесты бьют по каждому месту, где раньше интерполировались данные, плюс
-держат общий инвариант по всем `raise` в каталоге — чтобы новый `raise`
-с `{filename}` не проехал незамеченным.
+держат allowlist-инвариант по всему конвейеру — чтобы новый `raise` с
+именем файла не проехал незамеченным.
 """
 
 from __future__ import annotations
@@ -37,11 +39,21 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 # docs/FUNCTIONAL_CHECKLIST.md.
 DOCUMENT_PATH_PACKAGES = ("ingest", "extract", "classify", "route", "serve")
 
-# Имена, за которыми стоят данные экспорта: путь вложения, href, сырой текст,
-# подпись, тело сообщения, корень экспорта.
-FORBIDDEN_IN_RAISE = frozenset(
-    {"relative", "decoded", "href", "title", "source", "body", "text", "export_dir"}
-)
+# **Allowlist, не денилист.** Первая редакция перечисляла запрещённые имена
+# (`relative`, `href`, `title`…) — то есть держалась на конвенции именования,
+# которую ничто не проверяет. Adversarial-ревью показало дыру за минуту:
+# в `export_reader` путь вложения зовётся `rel`, а весь сырой словарь
+# сообщения — `item`; ни то, ни другое в денилист не входило, и
+# `raise X(f"{rel}")` прошёл бы зелёным.
+#
+# Теперь наоборот: в аргументе `raise` разрешено ровно перечисленное, всё
+# остальное роняет тест. Fails closed — новая переменная с данными не пройдёт
+# просто потому, что её никто не догадался запретить.
+ALLOWED_IN_RAISE = frozenset({
+    "message_id",   # идентификатор сообщения — инвариант 1 его не запрещает
+    "reason",       # имя класса пойманного исключения, не его текст
+    "RESULT_JSON",  # константа модуля, литерал "result.json"
+})
 
 # Выдуманное имя, по которому видно утечку: если оно всплыло в тексте
 # исключения — значит имя файла из экспорта туда попало.
@@ -51,9 +63,53 @@ SECRET_NAME = "tajna-faktura-kowalski"
 def _document_path_modules() -> list[Path]:
     modules: list[Path] = []
     for package in DOCUMENT_PATH_PACKAGES:
-        modules.extend(sorted((SRC / "segregator" / package).glob("*.py")))
+        # rglob, не glob: `glob("*.py")` не заходит в подпакеты, и инвариант
+        # тихо переставал бы действовать в тот день, когда в `ingest/`
+        # появится `parsers/`. Найдено adversarial-ревью.
+        modules.extend(sorted((SRC / "segregator" / package).rglob("*.py")))
     assert modules, "не найдено ни одного модуля конвейера — инвариант пустой"
     return modules
+
+
+def _names_in_raise_args(source: str) -> list[tuple[int, str]]:
+    """Имена, попадающие в текст исключения, с номерами строк.
+
+    Смотрим три вещи:
+    - **аргументы** конструктора (`node.exc.args`/`keywords`), но НЕ сам класс
+      исключения — `ValueError` в `raise ValueError(...)` это тоже `ast.Name`;
+    - **голый** `raise err` — так обходят проверку, собрав исключение заранее
+      (`err = X(f"{relative}"); raise err`);
+    - **`from exc`** — Python печатает цепочку `__cause__` в traceback, то есть
+      санитизированная обёртка над исключением stdlib всё равно вынесет путь.
+      Безопасная форма — `from None`.
+
+    Внутри аргументов обходится всё поддерево, поэтому видны `f"{x}"`,
+    `"a" + x`, `"{}".format(x)`, `x % y`, `foo.bar` (через базовое `foo`) и
+    `link.get("href")` (через `link`).
+    """
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Raise) or node.exc is None:
+            continue
+
+        if isinstance(node.exc, ast.Call):
+            subtrees = list(node.exc.args) + [kw.value for kw in node.exc.keywords]
+        else:
+            # `raise err` — само имя и есть подозреваемое.
+            subtrees = [node.exc]
+
+        cause = node.cause
+        if cause is not None and not (
+            isinstance(cause, ast.Constant) and cause.value is None
+        ):
+            # `from exc`: traceback напечатает текст исходного исключения.
+            subtrees.append(cause)
+
+        for subtree in subtrees:
+            for inner in ast.walk(subtree):
+                if isinstance(inner, ast.Name):
+                    found.append((node.lineno, inner.id))
+    return found
 
 
 def _html_export(tmp_path: Path, *, href: str = "files/ok.pdf",
@@ -112,7 +168,7 @@ def test_json_path_rejection_does_not_name_the_file(tmp_path):
 
 def test_unparsed_date_reports_message_id_not_the_raw_value(tmp_path):
     # Сырая строка даты — поле документа. В тексте её быть не должно;
-    # номер сообщения — идентификатор, он разрешён инвариантом 4.
+    # номер сообщения — идентификатор, инвариант 1 его не запрещает.
     export = _html_export(tmp_path, date_title="Kowalski 2025 nieprawidlowa data")
 
     with pytest.raises(ValueError) as caught:
@@ -133,69 +189,96 @@ def test_missing_blob_source_does_not_name_the_document(tmp_path):
     assert SECRET_NAME not in str(caught.value)
 
 
-def test_no_raise_on_the_document_path_interpolates_export_data():
-    """Инвариант по всему конвейеру обработки документа, а не по четырём
-    известным местам. Ловит новый `raise` с именем файла, который иначе прошёл
-    бы ревью: точечные тесты выше проверяют только то, что уже чинили.
+def test_nul_in_href_raises_the_designed_error_not_a_bare_valueerror(tmp_path):
+    """Регрессия от `unquote`, найденная adversarial-ревью прогона.
 
-    Разбор через `ast`, а не регуляркой. Регулярка вида
-    `raise\\s+\\w+\\((.*?)\\)` пропускает конкатенацию (`"плохо: " + relative`),
-    `.format(href)`, многострочный `raise X(...) from exc` и вложенные скобки
-    в f-строке — то есть ровно те формы, которыми утечка и вернётся.
+    `unquote("files/a%00.pdf")` превращает инертный литерал `%00` в настоящий
+    NUL, и `resolve()` роняет `ValueError: embedded null character` —
+    **не** `ExportPathError`. `cli.backfill` ловит только `FileNotFoundError`
+    и `ExportPathError`, `normalize.backfill` — `try/finally` без `except`:
+    голое исключение убивало весь прогон, а его traceback выносил наружу
+    декодированное имя файла (pytest печатает locals кадра pathlib).
+    """
+    export = _html_export(tmp_path, href=f"files/{SECRET_NAME}%00.pdf")
+
+    with pytest.raises(ExportPathError) as caught:
+        list(iter_messages_html(export))
+
+    # Именно ExportPathError, а не любой ValueError: подкласс ловится
+    # обработчиком в cli.py, родитель — нет.
+    assert type(caught.value) is ExportPathError
+    assert SECRET_NAME not in str(caught.value)
+
+
+def test_nul_in_json_file_field_raises_the_designed_error(tmp_path):
+    # JSON умеет нести \\u0000 в строке — здесь `unquote` ни при чём,
+    # экспозиция была и до него.
+    export = _json_export(tmp_path, f"files/{SECRET_NAME}\x00.pdf")
+
+    with pytest.raises(ExportPathError) as caught:
+        list(iter_messages_json(export))
+
+    assert type(caught.value) is ExportPathError
+    assert SECRET_NAME not in str(caught.value)
+
+
+def test_only_allowlisted_names_reach_exception_text_on_the_document_path():
+    """Инвариант по всему конвейеру, а не по известным местам.
+
+    Разбор через ast, а не регуляркой: регулярка над текстом `raise`
+    пропускает конкатенацию, `.format()`, `%`-формат и многострочный
+    `raise X(...) from exc` — то есть ровно те формы, которыми утечка
+    и вернётся.
+
+    Allowlist, а не денилист: денилист держится на именовании переменных,
+    и его пробили за минуту (`rel`, `item` в JSON-читателе). Здесь всё, что
+    не разрешено явно, роняет тест.
     """
     offenders: list[str] = []
-
     for path in _document_path_modules():
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Raise) or node.exc is None:
-                continue
-            # Всё поддерево аргументов исключения: f-строка, конкатенация,
-            # .format(), вызов хелпера — любая форма попадёт сюда.
-            for inner in ast.walk(node.exc):
-                if isinstance(inner, ast.Name) and inner.id in FORBIDDEN_IN_RAISE:
-                    offenders.append(
-                        f"{path.relative_to(SRC).as_posix()}:{node.lineno} "
-                        f"выносит {inner.id!r} в текст исключения"
-                    )
+        rel_path = path.relative_to(SRC).as_posix()
+        for lineno, name in _names_in_raise_args(path.read_text(encoding="utf-8")):
+            if name not in ALLOWED_IN_RAISE:
+                offenders.append(f"{rel_path}:{lineno} выносит {name!r} в текст исключения")
 
     assert not offenders, (
-        "данные документа в тексте исключения на пути обработки: "
-        + "; ".join(sorted(set(offenders)))
+        "в тексте исключения на пути обработки документа разрешены только "
+        f"{sorted(ALLOWED_IN_RAISE)}; найдено: " + "; ".join(sorted(set(offenders)))
     )
 
 
-def test_the_invariant_actually_catches_every_leak_shape():
-    """Проверка самого инварианта: он должен ловить не только f-строку.
+def test_the_invariant_catches_every_evasion_shape():
+    """Проверка самого инварианта. Без неё предыдущий тест мог бы быть зелёным
+    просто потому, что слеп, — и выглядел бы доказательством чистоты.
 
-    Без этого предыдущий тест мог бы быть зелёным просто потому, что не умеет
-    видеть утечку — а выглядел бы как доказательство её отсутствия.
+    Формы ниже — не выдумка: каждую предложило adversarial-ревью как способ
+    пронести данные мимо первой (денилист + регулярка) редакции.
     """
-    leaks = [
-        'raise ValueError(f"плохо: {relative}")',        # f-строка
-        'raise ValueError("плохо: " + relative)',         # конкатенация
-        'raise ValueError("плохо: {}".format(href))',     # .format()
-        'raise ValueError("плохо: %s" % source)',         # %-формат
-        'raise ValueError(f"a{title}b") from exc',        # from-цепочка
-        'raise ValueError("\\n".join([body]))',           # внутри вызова
+    evasions = [
+        'raise ValueError(f"плохо: {relative}")',            # f-строка
+        'raise ValueError("плохо: " + relative)',            # конкатенация
+        'raise ValueError("плохо: {}".format(href))',        # .format()
+        'raise ValueError("плохо: %s" % source)',            # %-формат
+        'raise ValueError(chr(10).join([body]))',            # внутри вызова
+        'raise ValueError(f"{rel}")',                        # имя вне денилиста
+        'raise ValueError(f"{item}")',                       # сырой словарь сообщения
+        'raise ValueError(f"{attachment.path}")',            # доступ к атрибуту
+        'raise ValueError(f"{link.get(chr(104))}")',         # результат вызова
+        'p = decoded\nraise ValueError(f"{p}")',             # алиас
+        'err = ValueError(f"{relative}")\nraise err',        # отложенная сборка
+        'raise ValueError("чисто") from exc',                # __cause__ в traceback
     ]
-    for snippet in leaks:
-        tree = ast.parse(snippet)
-        found = [
-            inner.id
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Raise) and node.exc is not None
-            for inner in ast.walk(node.exc)
-            if isinstance(inner, ast.Name) and inner.id in FORBIDDEN_IN_RAISE
-        ]
-        assert found, f"инвариант не увидел утечку: {snippet}"
+    for snippet in evasions:
+        names = {n for _, n in _names_in_raise_args(snippet)}
+        assert names - ALLOWED_IN_RAISE, f"инвариант не увидел утечку: {snippet!r}"
 
-    # И не срабатывает на честном тексте без данных.
-    clean = ast.parse('raise ValueError("Путь вложения ведёт за пределы корня")')
-    assert not [
-        inner
-        for node in ast.walk(clean)
-        if isinstance(node, ast.Raise) and node.exc is not None
-        for inner in ast.walk(node.exc)
-        if isinstance(inner, ast.Name) and inner.id in FORBIDDEN_IN_RAISE
+    # И не срабатывает на честных формах.
+    clean = [
+        'raise ValueError("Путь вложения ведёт за пределы корня")',
+        'raise ValueError(f"Не разобрана дата сообщения {message_id}")',
+        'raise ExportPathError(f"не разобрать: {reason}") from None',
+        'raise FileNotFoundError(f"нет {RESULT_JSON}")',
     ]
+    for snippet in clean:
+        names = {n for _, n in _names_in_raise_args(snippet)}
+        assert not (names - ALLOWED_IN_RAISE), f"ложное срабатывание: {snippet!r}"

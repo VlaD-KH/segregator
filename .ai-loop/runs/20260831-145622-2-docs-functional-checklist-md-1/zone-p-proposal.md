@@ -68,6 +68,21 @@
 
 ---
 
+## 1b. `.gitignore` — не коммитить worktree'ы воркфлоу (D30)
+
+Временные worktree'ы попали в `main` коммитом `5594f25` как gitlink'и на
+каталоги, которых уже нет. Из индекса убраны, но правило нужно:
+
+```diff
+--- a/.gitignore
++++ b/.gitignore
+@@
+ probe/probe_result_html.txt
++.claude/worktrees/
+```
+
+---
+
 ## 2. `.env.example` — актуальный `EXPORT_DIR` (D16)
 
 Данные лежат в `C:\Users\Huawei\source\segregator\JDG`. `git apply` этого
