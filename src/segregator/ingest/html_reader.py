@@ -53,7 +53,7 @@ def export_pages(export_dir: Path) -> list[Path]:
     pages = [p for p in export_dir.iterdir() if p.is_file() and PAGE_RE.match(p.name)]
     if not pages:
         raise FileNotFoundError(
-            f"В {export_dir} нет messages*.html. "
+            "В каталоге EXPORT_DIR нет messages*.html. "
             "Если экспорт в JSON, разбирает ingest.export_reader."
         )
     return sorted(pages, key=_page_order)
@@ -186,8 +186,11 @@ def _text_of(node) -> str | None:
 def _resolve_inside(export_dir: Path, relative: str) -> Path:
     """Резолвить путь вложения строго внутри корня экспорта.
 
-    Та же защита, что и в JSON-читателе: href приходит из данных и управляем
-    не нами.
+    Проверка выхода за корень — та же, что в JSON-читателе (href приходит из
+    данных и управляем не нами). **Декодирование — только здесь**: в
+    `result.json` Telegram пишет литеральные пути, и `unquote` там испортил бы
+    имя с настоящим знаком процента. Асимметрия намеренная, см. докстринг
+    `export_reader._resolve_inside`.
 
     href в HTML-экспорте процентно-кодирован (Telegram так пишет имена с
     пробелами и не-ASCII: `files/faktura%20nr%201.pdf`). Декодируем ДО резолва,

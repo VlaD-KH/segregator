@@ -147,6 +147,51 @@ def test_missing_messages_html_raises(tmp_path):
         list(iter_messages_html(empty))
 
 
+def test_percent_encoded_href_resolves_to_the_real_file(tmp_path):
+    """Дефект D1: Telegram кодирует пробелы и не-ASCII в href.
+
+    Без `unquote` резолвился путь с литеральным `%20`, файл не находился, и
+    вложение ТИХО уходило в missing_files — на польских именах это давало бы
+    десятки ложных «не найдено», неотличимых от невыгруженного медиа.
+    """
+    export = _export_with(tmp_path, "files/faktura%20nr%201.pdf")
+    (export / "files" / "faktura nr 1.pdf").write_bytes(b"ok")
+
+    attachment = list(iter_messages_html(export))[0].attachments[0]
+
+    assert attachment.path.name == "faktura nr 1.pdf"
+    assert attachment.exists is True
+
+
+def test_percent_encoded_diacritics_resolve(tmp_path):
+    # Польская диакритика в имени файла — обычное дело в этом канале.
+    export = _export_with(tmp_path, "files/za%C5%82%C4%85cznik.pdf")
+    (export / "files" / "załącznik.pdf").write_bytes(b"ok")
+
+    attachment = list(iter_messages_html(export))[0].attachments[0]
+
+    assert attachment.path.name == "załącznik.pdf"
+    assert attachment.exists is True
+
+
+def test_percent_encoded_traversal_is_still_rejected(tmp_path):
+    """Декодирование не должно открывать дыру в защите от выхода за корень.
+
+    Порядок обязан быть decode → resolve → is_relative_to: если проверять
+    ДО декодирования, `%2e%2e%2f` проскочит как обычное имя файла.
+    """
+    export = _export_with(tmp_path, "files/%2e%2e%2f%2e%2e%2fevil.pdf")
+    with pytest.raises(ExportPathError):
+        list(iter_messages_html(export))
+
+
+def test_percent_encoded_backslash_traversal_is_rejected(tmp_path):
+    # Windows-разделитель в кодированном виде — тот же обход другим байтом.
+    export = _export_with(tmp_path, "files/%2e%2e%5c%2e%2e%5cevil.pdf")
+    with pytest.raises(ExportPathError):
+        list(iter_messages_html(export))
+
+
 def test_nested_chatexport_dir_is_not_scanned(tmp_path):
     """Настоящий JDG/ содержит и messages.html, и ChatExport_*/messages.html.
 

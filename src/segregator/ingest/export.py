@@ -45,7 +45,11 @@ def detect_format(export_dir: Path) -> str:
     """
     export_dir = Path(export_dir)
     if not export_dir.is_dir():
-        raise FileNotFoundError(f"Каталог экспорта не найден: {export_dir}")
+        # Путь не печатаем даже здесь. Правило «в тексте исключения нет данных»
+        # держится без исключений: сегодня это безобидный корень экспорта,
+        # завтра кто-то по аналогии выведет путь к документу. Называем ключ
+        # конфига — этого хватает, чтобы понять, что чинить.
+        raise FileNotFoundError("Каталог экспорта не найден — проверь EXPORT_DIR")
 
     if (export_dir / export_reader.RESULT_JSON).is_file():
         return JSON
@@ -56,8 +60,8 @@ def detect_format(export_dir: Path) -> str:
         return HTML
 
     raise FileNotFoundError(
-        f"В {export_dir} нет ни {export_reader.RESULT_JSON}, ни messages*.html — "
-        "не похоже на экспорт Telegram Desktop."
+        f"В каталоге EXPORT_DIR нет ни {export_reader.RESULT_JSON}, "
+        "ни messages*.html — не похоже на экспорт Telegram Desktop."
     )
 
 

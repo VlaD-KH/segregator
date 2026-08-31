@@ -76,7 +76,7 @@ def _result_path(export_dir: Path) -> Path:
     path = Path(export_dir) / RESULT_JSON
     if not path.is_file():
         raise FileNotFoundError(
-            f"Не найден {RESULT_JSON} в {export_dir}. "
+            f"В каталоге EXPORT_DIR не найден {RESULT_JSON}. "
             "Если экспорт сделан в HTML, разбор устроен иначе — см. SPEC.md."
         )
     return path
@@ -115,6 +115,12 @@ def _resolve_inside(export_dir: Path, relative: str) -> Path:
 
     Путь приходит из данных, то есть управляем не нами: `../../..` в поле
     `file` иначе увёл бы чтение и запись куда угодно по файловой системе.
+
+    **`unquote` здесь НЕ вызывается, и это не упущение.** Telegram пишет в
+    `result.json` литеральные относительные пути (`"file": "files/doc_a.pdf"`),
+    без процентного кодирования — в отличие от href в HTML-экспорте, где оно
+    есть и где `html_reader._resolve_inside` декодирует. Добавить decode сюда
+    значило бы испортить имя файла, в котором стоит настоящий знак процента.
     """
     root = export_dir.resolve()
     candidate = (root / relative).resolve()

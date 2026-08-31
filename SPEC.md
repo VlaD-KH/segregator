@@ -56,6 +56,7 @@ LLM-API в проекте нет.
 
 ```
 Установка:      pip install -e .
+Установка+тесты: pip install -e ".[dev]"     ← нужно, чтобы появился pytest
 Тесты:          python -m pytest tests/ -v
 Один тест:      python -m pytest tests/test_ingest_backfill.py -v
 Инициализация:  segregator init
