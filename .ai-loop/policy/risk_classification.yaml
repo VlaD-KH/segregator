@@ -1,0 +1,97 @@
+# ai-loop control plane — risk levels and what each one costs (Segregator)
+#
+# protected_paths.yaml answers "may an agent change this?".
+# This file answers "how much autonomy does changing it earn?".
+#
+# The two must agree. `classify_diff.py --self-check` fails the run when they
+# do not: a HIGH classification with an auto gate is a LOW policy wearing a
+# HIGH label.
+#
+# Rewritten for Segregator together with protected_paths.yaml; the previous
+# version described the Why_Ai tree. PENDING HUMAN REVIEW.
+
+version: "1.0"
+levels: [LOW, MEDIUM, HIGH, CRITICAL]
+
+# Baseline risk implied by zone membership.
+zone_default_risk:
+  R: CRITICAL
+  P: CRITICAL
+  I: HIGH
+  T: MEDIUM
+  E: LOW
+
+# What each level permits. HIGH and CRITICAL must stay `require_human`;
+# --self-check refuses anything else.
+gate:
+  LOW: auto
+  MEDIUM: auto
+  HIGH: require_human
+  CRITICAL: require_human
+
+# Finer-grained overrides. A matrix entry may always RAISE risk. It may lower
+# risk only inside a zone whose autonomous_mutation is true — otherwise a
+# narrow entry could quietly unprotect a protected zone.
+matrix:
+  - path: "tests/test_data_boundary.py"
+    risk: HIGH
+    autonomous_mutation: false
+    human_approval_required: true
+    reason: >
+      Физически зона T (тесты, MEDIUM/auto), но это не обычный тест — это
+      сигнализация контура данных: он падает, когда логгер зовут с
+      чувствительным полем, когда конфиг принимает не-loopback LLM и когда в
+      tests/fixtures/ появился файл без пометки synthetic. Ослабить его —
+      значит бесшумно выключить проверку, ради которой он написан, причём
+      сборка останется зелёной. Ровно тот случай, когда zone membership
+      доверять нельзя.
+
+  - path: "tests/fixtures/"
+    risk: HIGH
+    autonomous_mutation: false
+    human_approval_required: true
+    reason: >
+      Единственное место в репозитории, куда настоящий документ может попасть
+      «по дороге» — достаточно один раз положить сюда реальную фактуру для
+      отладки. manifest.json это ловит, но проверка живёт в том же дереве,
+      что и данные, поэтому цена ошибки асимметрична: утёкший документ из
+      истории git уже не вынуть.
+
+  - path: "src/segregator/ingest/normalize.py"
+    risk: HIGH
+    autonomous_mutation: false
+    human_approval_required: true
+    reason: >
+      Зона E как остальной конвейер, но это единственный модуль, который
+      одновременно держит в руках метаданные документа (orig_name, body,
+      raw) и вызывает логгер. Механизм маскирования лежит в logging.py (R),
+      однако решение, ЧТО передать в лог, принимается здесь — и передать
+      сюда имя файла ничего не стоит.
+
+  - path: "rules/"
+    risk: HIGH
+    autonomous_mutation: false
+    human_approval_required: true
+    reason: >
+      rules.yaml (появится в Э4) решает, в какую категорию уедет документ и с
+      какой уверенностью. Config-like по форме, но по последствиям это
+      бухгалтерская классификация реального ИП: тихая правила порога или
+      маршрута меняет содержимое реестра, который человек отдаёт бухгалтеру.
+      CLAUDE.md отдельно требует, чтобы правило не попадало в main без теста.
+
+# Conditions that raise the level computed from paths alone.
+escalations:
+  test_and_product_same_diff: 1
+  policy_plane_touched: CRITICAL
+  unmatched_path: CRITICAL
+  files_changed_over: {threshold: 25, bump: 1}
+  lines_changed_over: {threshold: 800, bump: 1}
+  cumulative_run_diff: true
+
+# Separation of powers. These are assertions about the project, checked by
+# control-plane-review, not settings the loop can flip.
+separation:
+  proposer_is_not_evaluator: true
+  evaluator_is_not_policy_editor: true
+  evaluator_is_deterministic: true
+  merge_authority: human

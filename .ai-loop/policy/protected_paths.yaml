@@ -1,0 +1,180 @@
+# ai-loop control plane — zone boundaries (Segregator)
+#
+# This file answers ONE question: which paths may an autonomous agent change?
+# It does not answer "how risky is the change" — that is risk_classification.yaml.
+#
+# Derived from the ACTUAL repository tree of Segregator (git ls-files at
+# commit 5065cb3). It REPLACES a control plane that had been copied in from
+# the Why_Ai project and described a tree that does not exist here
+# (Supervisor/, Core/, Eye/, Tool/, why_ai_config.yaml) — under that map every
+# file in src/segregator/ matched no zone and fell to CRITICAL by default.
+#
+# The loop must never author or edit a COMMITTED policy. This file was drafted
+# while .ai-loop/ was still untracked — the one case classify_diff.py allows —
+# and is PENDING HUMAN REVIEW. Review the zones, then commit it yourself.
+#
+# Matching rules (enforced by .ai-loop/bin/classify_diff.py):
+#   "dir/"        prefix match on a directory
+#   "path/file"   exact file, or that path as a directory prefix
+#   "glob/*.ext"  fnmatch glob
+# When a path matches several zones, the MOST PROTECTED zone wins (R > P > I > T > E).
+# When a path matches NO zone, it is CRITICAL. New files are guilty until listed.
+
+version: "1.0"
+generated_by: "ai-loop/control-plane-init (rewritten for Segregator)"
+generated_at: "2026-08-31T09:30:00Z"
+reviewed_by: "PENDING — не подтверждено человеком"
+reviewed_at: null
+baseline_commit: "5065cb3"  # Э2/Т4, последний коммит на момент составления
+
+enforcement:
+  diff_is_authoritative: true
+  mixed_diff_policy: MAX_RISK_WINS
+  default_risk_for_unmatched: CRITICAL
+  fail_closed: true
+  # Только собственная бухгалтерия ai-loop: классифицировать запись о решении
+  # значило бы, что запись меняет решение. Рантайм-состояние проекта
+  # (archiwum/, blobs/, logs/, *.db) сюда НЕ вносится намеренно — оно закрыто
+  # .gitignore и в диффе появиться не должно; если появится, пусть кричит.
+  exclusions:
+    - ".ai-loop/ledger.jsonl"
+    - ".ai-loop/runs/"
+    - ".ai-loop/artifacts/"
+    - ".ai-loop/archive/"
+
+zones:
+  R:
+    label: "Regulated / correctness core — where a wrong change causes real-world harm"
+    rationale: >
+      В Segregator реальный вред — это две вещи, и обе названы в
+      docs/DATA_BOUNDARY.md. Первая: содержимое настоящих бухгалтерских
+      документов, PESEL, IBAN и NIP реального ИП утекает с машины. Вторая:
+      система портит или теряет архив, который по Ustawa o rachunkowości
+      обязана хранить 5 лет и вести append-only ślad rewizyjny.
+      Соответственно в R лежит не «весь код», а именно те файлы, которые
+      удерживают эти два свойства: механизм маскирования логов, валидатор
+      конфига (он и есть проверка «LLM только на loopback»), защита от
+      выхода за корень экспорта, миграции схемы (разрушительная миграция =
+      юридическая проблема, а не баг), сам документ о контуре и инварианты,
+      которые вшиваются в промпт каждого доменного агента.
+    autonomous_mutation: false
+    human_approval_required: true
+    paths:
+      - "docs/DATA_BOUNDARY.md"
+      - "src/segregator/logging.py"
+      - "src/segregator/config.py"
+      - "src/segregator/ingest/export_reader.py"
+      - "src/segregator/db/migrations/"
+      - "agents/prompts/"
+      - "probe/"
+      # probe/ читает настоящий экспорт и пишет отчёт, который человек затем
+      # передаёт ассистенту. Правка, которая начнёт выводить туда имена или
+      # содержимое документов, пробивает контур ровно в том месте, где его
+      # никто не ждёт — поэтому это R, а не «диагностический скрипт».
+
+  P:
+    label: "Policy plane — the mechanism that constrains the agent"
+    rationale: >
+      Universal across projects. If the loop can edit these, every other zone
+      is decorative: it can simply delete the rule that stops it. .claude/ и
+      .gitignore включены потому, что первый задаёт пол разрешений, а второй
+      решает, что классификатор вообще увидит. Для Segregator .gitignore
+      критичен вдвойне: именно он держит настоящие документы (JDG/) и .env с
+      токеном вне истории git.
+    autonomous_mutation: false
+    human_approval_required: true
+    paths:
+      - ".ai-loop/policy/"
+      - ".ai-loop/bin/"
+      - ".ai-loop/ledger.jsonl"
+      - "CODEOWNERS"
+      - ".github/"
+      - ".gitattributes"
+      - ".gitignore"
+      - ".claude/"
+
+  I:
+    label: "Infrastructure and dependencies"
+    rationale: >
+      Точки входа и конфигурация, решающие что и как запускается, — на старте,
+      а не внутри запроса. Сюда же шаблоны конфигов: они не содержат секретов,
+      но задают, какие переменные вообще существуют.
+    autonomous_mutation: false
+    human_approval_required: true
+    paths:
+      - "pyproject.toml"
+      - "src/segregator/cli.py"
+      - "src/segregator/__main__.py"
+      - "src/segregator/paths.py"
+      - "src/segregator/db/migrate.py"
+      - ".env.example"
+      - "config.example.toml"
+      - "*.lock"
+      - "requirements*.txt"
+
+  T:
+    label: "Tests"
+    rationale: >
+      Editable, but never in the same change as the code they check — that is
+      how a red test becomes green without the bug being fixed.
+      classify_diff.py escalates a diff that touches T and non-T together.
+      Исключение — tests/test_data_boundary.py и tests/fixtures/: у них
+      matrix-override в risk_classification.yaml, см. там причину.
+    autonomous_mutation: true
+    human_approval_required: false
+    paths:
+      - "tests/"
+
+  E:
+    label: "Evolvable surface — explicit allowlist only"
+    rationale: >
+      Единственная зона, которую цикл меняет сам. Прикладной код конвейера
+      (ingest/normalize, extract, classify, route, serve) сюда попадает
+      сознательно: это и есть работа, ради которой цикл существует, а его
+      ошибки ловятся тестами и не пробивают контур — файлы, которые контур
+      удерживают, вынесены в R. Документы цикла (SPEC.md, tasks/) и
+      пояснительные тексты авторитета времени выполнения не несут.
+    autonomous_mutation: true
+    human_approval_required: false
+    paths:
+      - "docs/"
+      - "README.md"
+      - "HANDOFF.md"
+      - "CLAUDE.md"
+      - "SPEC.md"
+      - "tasks/"
+      - "src/segregator/__init__.py"
+      - "src/segregator/db/__init__.py"
+      - "src/segregator/ingest/"
+      - "src/segregator/extract/"
+      - "src/segregator/classify/"
+      - "src/segregator/route/"
+      - "src/segregator/serve/"
+      - "rules/"
+      - "agents/schemas/"
+
+# Paths deliberately left unzoned, with the reason. Everything here is
+# CRITICAL by default; this section exists so a reviewer can tell "not yet
+# decided" from "decided to leave protected".
+unzoned_notes:
+  - path: "JDG/"
+    reason: >
+      Настоящий экспорт Telegram: реальные фактуры, чеки и .env с токеном
+      бота, перенесённые внутрь репозитория. Это данные, не код. Агент не
+      имеет права их менять, а в диффе они не должны появляться вообще —
+      их обязан закрывать .gitignore. Оставлено неразмеченным намеренно:
+      если файл отсюда всё-таки попал в дифф, значит .gitignore дырявый, и
+      CRITICAL — правильная реакция, а не помеха.
+  - path: "agents/*.yaml"
+    reason: >
+      Спецификации доменных агентов (01_ocr_ksef, 02_ksiegowy, 03_kadrowy,
+      04_doradca) и registry.yaml. Prompt-like: правка меняет поведение
+      модели на настоящих документах, не трогая ни строчки кода. Схемы
+      ответов (agents/schemas/) отнесены к E — это контракты, они
+      проверяются валидацией; сами промпты — нет. Оставлено CRITICAL до
+      решения человека, поднимать ли их в R.
+  - path: "src/segregator/db/migrations/ (новые файлы)"
+    reason: >
+      Каталог уже в R, отмечено отдельно: новая миграция — это не «ещё один
+      файл», а необратимая операция над архивом, который по закону хранится
+      пять лет.

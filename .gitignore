@@ -13,3 +13,6 @@ logs/
 .pytest_cache/
 *.egg-info/
 build/
+JDG/
+ChatExport_*/
+messages*.html
