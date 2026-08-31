@@ -12,6 +12,9 @@ dependencies = [
     "structlog>=24.1",
     # Потоковый разбор result.json: экспорт за год не обязан влезать в память.
     "ijson>=3.5",
+    # Разбор HTML-экспорта Telegram Desktop (messages*.html). Бэкенд html.parser
+    # из stdlib — без lxml, чтобы ничего не компилировать на iGPU-машине.
+    "beautifulsoup4>=4.12",
 ]
 
 [project.scripts]

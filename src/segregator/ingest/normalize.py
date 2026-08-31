@@ -16,7 +16,7 @@ from pathlib import Path
 
 from segregator.db import migrate
 from segregator.ingest.blobs import blob_relative_path, sha256_of, store_blob
-from segregator.ingest.export_reader import RawMessage, iter_messages, read_chat_id
+from segregator.ingest.export import RawMessage, iter_messages, read_chat_id
 from segregator.logging import get_logger
 
 log = get_logger(__name__)

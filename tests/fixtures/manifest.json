@@ -1,7 +1,7 @@
 {
   "export_min/result.json": {
     "synthetic": true,
-    "note": "Выдуманный экспорт Telegram Desktop: 5 сообщений + 1 служебное. Ни одного настоящего документа, контрагента или NIP."
+    "note": "Выдуманный JSON-экспорт Telegram Desktop: 5 сообщений + 1 служебное. Ни одного настоящего документа, контрагента или NIP."
   },
   "export_min/files/doc_a.pdf": {
     "synthetic": true,
@@ -14,5 +14,34 @@
   "export_min/photos/photo_1.jpg": {
     "synthetic": true,
     "note": "Текстовая заглушка с JPEG-сигнатурой."
+  },
+
+  "export_html/messages.html": {
+    "synthetic": true,
+    "note": "Выдуманный HTML-экспорт Telegram Desktop, структура снята с probe 02: message default clearfix [joined], message service, pull_right date details[title], media_file, photo_wrap. 6 сообщений + 2 служебных."
+  },
+  "export_html/messages2.html": {
+    "synthetic": true,
+    "note": "Вторая страница пагинации — проверяет, что читатель обходит messages2.html, messages3.html и т.д."
+  },
+  "export_html/files/doc_a.pdf": {
+    "synthetic": true,
+    "note": "Заглушка. Referenced дважды (message101 и message103) — проверяет дедупликацию."
+  },
+  "export_html/files/doc_b.pdf": {
+    "synthetic": true,
+    "note": "Заглушка, лежит на второй странице пагинации."
+  },
+  "export_html/files/umowa.docx": {
+    "synthetic": true,
+    "note": "Заглушка docx — в реальном экспорте такие есть (6 штук по переписи)."
+  },
+  "export_html/files/tracker_widget.html": {
+    "synthetic": true,
+    "note": "ЛОВУШКА. В настоящем экспорте в files/ лежат .html-вложения (React-приложение, присланное файлом). Читатель обязан их игнорировать и не принимать за страницу экспорта."
+  },
+  "export_html/photos/photo_1.jpg": {
+    "synthetic": true,
+    "note": "Заглушка с JPEG-сигнатурой."
   }
 }
