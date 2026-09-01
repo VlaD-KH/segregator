@@ -21,13 +21,17 @@ EXPECTED_TABLES = {
     "runtime_state",
     "docs_fts",
     "schema_migrations",
+    "kpir_entries",
+    "zus_declarations",
+    "tax_advances",
+    "sync_watermarks",
 }
 
 
 def test_migrate_creates_all_tables(tmp_path):
     db_path = tmp_path / "segregator.db"
     applied = migrate.migrate(db_path)
-    assert applied == [1]
+    assert applied == [1, 2]
 
     conn = migrate.get_connection(db_path)
     try:
