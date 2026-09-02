@@ -19,3 +19,6 @@ messages*.html
 probe/probe_result_html.txt
 !tests/fixtures/**/messages*.html
 Google drive/
+antigravity_debug.log
+.claude/worktrees/
+/segregator-agents/

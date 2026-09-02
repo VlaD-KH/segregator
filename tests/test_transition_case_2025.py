@@ -11,16 +11,16 @@ from datetime import date
 from decimal import Decimal
 import pytest
 
-from src.segregator.domain.models import (
+from segregator.domain.models import (
     EmploymentPeriod,
-    EmploymentType,
+    EmploymentTypeKind,
     TaxpayerProfile,
     TaxRegime,
     ZUSStage,
 )
-from src.segregator.domain.zus import ZUSCalculator
-from src.segregator.tax.pit import PITCalculator
-from src.segregator.compliance.pit36 import (
+from segregator.domain.zus import ZUSCalculator
+from segregator.tax.pit import PITCalculator
+from segregator.compliance.pit36 import (
     IncomeSourceRecord,
     PITBAttachment,
     PIT36Consolidator,
@@ -41,7 +41,7 @@ def test_full_year_2025_transition_case():
         employment_history=[
             # Период 1: Январь - Май (UoP, 5 месяцев)
             EmploymentPeriod(
-                emp_type=EmploymentType.UOP,
+                emp_type=EmploymentTypeKind.UOP,
                 start_date=date(2025, 1, 1),
                 end_date=date(2025, 5, 31),
                 monthly_gross_avg=Decimal('10000.00'),
@@ -49,7 +49,7 @@ def test_full_year_2025_transition_case():
             ),
             # Период 2: Июнь - Сентябрь (UZ, 4 месяца)
             EmploymentPeriod(
-                emp_type=EmploymentType.UZ,
+                emp_type=EmploymentTypeKind.UZ,
                 start_date=date(2025, 6, 1),
                 end_date=date(2025, 9, 30),
                 monthly_gross_avg=Decimal('8000.00'),
@@ -57,7 +57,7 @@ def test_full_year_2025_transition_case():
             ),
             # Период 3: Октябрь - Декабрь (JDG, старт 01.10.2025)
             EmploymentPeriod(
-                emp_type=EmploymentType.JDG,
+                emp_type=EmploymentTypeKind.JDG,
                 start_date=date(2025, 10, 1),
                 end_date=None,
                 payer_nip="5252344078"

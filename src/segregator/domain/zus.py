@@ -1,16 +1,16 @@
 """
 src/segregator/domain/zus.py
 Детерминированный калькулятор обязательств ZUS (Social Security) для Польши.
-Строгая арифметика на базе Decimal. Никаких вычислений в LLM.
+Строгая арифметика на базе Decimal. Отказ от расчетов для неизвестных годов.
 """
 
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Optional
 
-from src.segregator.domain.models import (
+from segregator.domain.models import (
     EmploymentPeriod,
-    EmploymentType,
+    EmploymentTypeKind,
     TaxpayerProfile,
     TaxRegime,
     ZUSObligations,
@@ -47,11 +47,15 @@ class ZUSConstants:
     
     @classmethod
     def get_minimal_wage(cls, year: int) -> Decimal:
-        return cls.MINIMAL_WAGES.get(year, cls.MINIMAL_WAGES[2025])
+        if year not in cls.MINIMAL_WAGES:
+            raise ValueError(f"Brak stawek minimalnego wynagrodzenia dla roku {year}. Odmowa kalkulacji.")
+        return cls.MINIMAL_WAGES[year]
         
     @classmethod
     def get_average_wage(cls, year: int) -> Decimal:
-        return cls.AVERAGE_WAGES.get(year, cls.AVERAGE_WAGES[2025])
+        if year not in cls.AVERAGE_WAGES:
+            raise ValueError(f"Brak stawek przeciętnego wynagrodzenia dla roku {year}. Odmowa kalkulacji.")
+        return cls.AVERAGE_WAGES[year]
 
 
 class ZUSCalculator:
@@ -60,49 +64,47 @@ class ZUSCalculator:
     Реализует хронологию льгот и Zbieg tytułów ubezpieczeń.
     """
 
-    @staticmethod
-    def determine_zus_stage(jdg_start_date: date, target_date: date) -> ZUSStage:
+    @classmethod
+    def determine_zus_stage(cls, jdg_start_date: date, target_month: date) -> ZUSStage:
         """
-        Определяет стадию ZUS на целевую дату.
-        Правило 6 месяцев Ulga na start:
-        - Если старт 1-го числа: ровно 6 месяцев (с месяца старта по месяц +5).
-        - Если старт >1-го числа: текущий неполный месяц + 6 следующих полных месяцев.
+        Определяет этап ZUS на основе даты открытия JDG и целевого месяца.
         """
-        if target_date < jdg_start_date:
-            raise ValueError(f"Целевая дата {target_date} предшествует дате открытия JDG {jdg_start_date}")
+        if target_month < jdg_start_date:
+            return ZUSStage.BRAK
 
-        # Разница в месяцах
-        months_diff = (target_date.year - jdg_start_date.year) * 12 + (target_date.month - jdg_start_date.month)
+        # Подсчет полных месяцев
+        months_diff = (target_month.year - jdg_start_date.year) * 12 + (target_month.month - jdg_start_date.month)
         
-        # Если старт не 1-го числа месяца, первый месяц "бонусный" и не уменьшает лимит 6 месяцев
-        effective_elapsed_months = months_diff if jdg_start_date.day == 1 else months_diff - 1
-
-        if effective_elapsed_months < 6:
-            return ZUSStage.ULGA_NA_START
-        elif effective_elapsed_months < (6 + 24):
-            return ZUSStage.PREFERENCYJNY
+        # Правило: Если JDG открыто не 1-го числа, текущий неполный месяц — бонусный
+        if jdg_start_date.day > 1:
+            if months_diff <= 6:
+                return ZUSStage.ULGA_NA_START
+            elif months_diff <= 30:
+                return ZUSStage.PREFERENCYJNY
+            else:
+                return ZUSStage.DUZY_ZUS
         else:
-            return ZUSStage.DUZY_ZUS
+            if months_diff < 6:
+                return ZUSStage.ULGA_NA_START
+            elif months_diff < 30:
+                return ZUSStage.PREFERENCYJNY
+            else:
+                return ZUSStage.DUZY_ZUS
 
-    @staticmethod
-    def check_zbieg_tytulow(profile: TaxpayerProfile, target_date: date) -> bool:
+    @classmethod
+    def check_zbieg_tytulow(cls, profile: TaxpayerProfile, target_month: date) -> bool:
         """
-        Проверяет пересечение титулов (Zbieg tytułów ubezpieczeń).
-        Если в целевом месяце действует трудовой договор (UoP) с окладом >= минимальной зарплаты,
-        предприниматель освобождается от социальных взносов в JDG.
+        Проверяет Zbieg tytułów ubezpieczeń (параллельная работа по найму).
         """
-        min_wage = ZUSConstants.get_minimal_wage(target_date.year)
+        min_wage = ZUSConstants.get_minimal_wage(target_month.year)
         
-        for period in profile.employment_history:
-            if period.emp_type == EmploymentType.UOP:
-                # Проверка активности периода
-                is_after_start = target_date >= period.start_date
-                is_before_end = period.end_date is None or target_date <= period.end_date
-                
-                if is_after_start and is_before_end:
-                    if period.monthly_gross_avg >= min_wage:
-                        return True
-                        
+        for p in profile.employment_history:
+            if p.emp_type == EmploymentTypeKind.UOP:
+                # Проверяем, активен ли UoP в целевом месяце
+                if p.start_date <= target_month:
+                    if p.end_date is None or p.end_date >= target_month:
+                        if p.monthly_gross_avg >= min_wage:
+                            return True
         return False
 
     @classmethod
@@ -114,91 +116,89 @@ class ZUSCalculator:
         include_chorobowe: bool = True
     ) -> ZUSObligations:
         """
-        Вычисляет точные суммы взносов ZUS за указанный месяц с точностью до гроша.
+        Рассчитывает ежемесячные суммы взносов ZUS.
         """
-        # Поиск периода JDG
-        jdg_period = next((p for p in profile.employment_history if p.emp_type == EmploymentType.JDG), None)
-        
+        # Поиск периода JDG в профиле
+        jdg_period = next((p for p in profile.employment_history if p.emp_type == EmploymentTypeKind.JDG), None)
         if not jdg_period:
-            raise ValueError("В профиле налогоплательщика не найден активный период JDG")
-            
-        stage = cls.determine_zus_stage(jdg_period.start_date, target_month)
-        has_zbieg = cls.check_zbieg_tytulow(profile, target_month)
-        
+            return ZUSObligations(
+                stage=ZUSStage.BRAK,
+                month=target_month.strftime("%Y-%m")
+            )
+
         year = target_month.year
+        month_str = target_month.strftime("%Y-%m")
         min_wage = ZUSConstants.get_minimal_wage(year)
         avg_wage = ZUSConstants.get_average_wage(year)
+
+        stage = cls.determine_zus_stage(jdg_period.start_date, target_month)
+        has_zbieg = cls.check_zbieg_tytulow(profile, target_month)
+
+        spoleczne_base = Decimal('0.00')
+        emerytalne = Decimal('0.00')
+        rentowe = Decimal('0.00')
+        chorobowe = Decimal('0.00')
+        wypadkowe = Decimal('0.00')
+        fp = Decimal('0.00')
+        forms = ["ZUS DRA"]
+
+        # Если действует Ulga na start или есть Zbieg tytułów -> социальные взносы = 0
+        if stage == ZUSStage.ULGA_NA_START or has_zbieg:
+            spoleczne_base = Decimal('0.00')
+            forms.append("ZUS ZZA")
+        elif stage == ZUSStage.PREFERENCYJNY:
+            spoleczne_base = (min_wage * Decimal('0.30')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            emerytalne = (spoleczne_base * ZUSConstants.RATE_EMERYTALNE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            rentowe = (spoleczne_base * ZUSConstants.RATE_RENTOWE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            if include_chorobowe:
+                chorobowe = (spoleczne_base * ZUSConstants.RATE_CHOROBOWE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            wypadkowe = (spoleczne_base * ZUSConstants.RATE_WYPADKOWE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            forms.append("ZUS ZUA")
+        elif stage == ZUSStage.DUZY_ZUS:
+            spoleczne_base = (avg_wage * Decimal('0.60')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            emerytalne = (spoleczne_base * ZUSConstants.RATE_EMERYTALNE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            rentowe = (spoleczne_base * ZUSConstants.RATE_RENTOWE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            if include_chorobowe:
+                chorobowe = (spoleczne_base * ZUSConstants.RATE_CHOROBOWE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            wypadkowe = (spoleczne_base * ZUSConstants.RATE_WYPADKOWE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            fp = (spoleczne_base * ZUSConstants.RATE_FP_FS).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            forms.append("ZUS ZUA")
+
+        total_spoleczne = emerytalne + rentowe + chorobowe + wypadkowe
+
+        # Расчет взноса на медицинское страхование (Składka zdrowotna)
+        zdrowotna_base = Decimal('0.00')
+        zdrowotna = Decimal('0.00')
         
-        month_str = target_month.strftime("%Y-%m")
-        obligations = ZUSObligations(
-            month=month_str,
+        regime = profile.jdg_tax_regime or TaxRegime.SKALA
+        min_zdrowotna = (min_wage * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        if regime == TaxRegime.SKALA:
+            zdrowotna_base = max(Decimal('0.00'), jdg_monthly_profit)
+            zdrowotna = max(min_zdrowotna, (zdrowotna_base * ZUSConstants.RATE_ZDROWOTNA_SKALA).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+        elif regime == TaxRegime.LINIOWY:
+            zdrowotna_base = max(Decimal('0.00'), jdg_monthly_profit)
+            zdrowotna = max(min_zdrowotna, (zdrowotna_base * ZUSConstants.RATE_ZDROWOTNA_LINIOWY).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+        elif regime == TaxRegime.RYCZALT:
+            # Для Ryczałt 9% от 60%/100%/180% средней зарплаты в IV кв.
+            zdrowotna_base = (avg_wage * Decimal('1.00')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            zdrowotna = (zdrowotna_base * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        total_do_zaplaty = total_spoleczne + fp + zdrowotna
+
+        return ZUSObligations(
             stage=stage,
+            month=month_str,
+            spoleczne_base=spoleczne_base,
+            zdrowotna_base=zdrowotna_base,
+            emerytalne=emerytalne,
+            rentowe=rentowe,
+            chorobowe=chorobowe,
+            wypadkowe=wypadkowe,
+            fundusz_pracy=fp,
+            skladka_zdrowotna=zdrowotna,
+            total_spoleczne=total_spoleczne,
+            total_zus_do_zaplaty=total_do_zaplaty,
+            forms_required=forms,
             zbieg_tytulow=has_zbieg
         )
-        
-        # Определяем необходимость уплаты социальных взносов
-        # Социальные взносы НЕ платятся при Zbieg tytułów или на стадии Ulga na start
-        must_pay_social = not (has_zbieg or stage == ZUSStage.ULGA_NA_START)
-        
-        if must_pay_social:
-            if stage == ZUSStage.PREFERENCYJNY:
-                # База: 30% от минимальной зарплаты
-                base_spoleczne = (min_wage * Decimal('0.30')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                pays_fp = False # На преференции FP не платится
-            elif stage == ZUSStage.DUZY_ZUS:
-                # База: 60% от средней зарплаты
-                base_spoleczne = (avg_wage * Decimal('0.60')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                pays_fp = True
-            else: # MALY_ZUS_PLUS
-                base_spoleczne = (min_wage * Decimal('0.30')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                pays_fp = False
-                
-            obligations.spoleczne_base = base_spoleczne
-            obligations.emerytalne = (base_spoleczne * ZUSConstants.RATE_EMERYTALNE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            obligations.rentowe = (base_spoleczne * ZUSConstants.RATE_RENTOWE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            obligations.wypadkowe = (base_spoleczne * ZUSConstants.RATE_WYPADKOWE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            
-            if include_chorobowe:
-                obligations.chorobowe = (base_spoleczne * ZUSConstants.RATE_CHOROBOWE).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                
-            if pays_fp:
-                obligations.fundusz_pracy = (base_spoleczne * ZUSConstants.RATE_FP_FS).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                
-            obligations.total_spoleczne = (
-                obligations.emerytalne +
-                obligations.rentowe +
-                obligations.wypadkowe +
-                obligations.chorobowe +
-                obligations.fundusz_pracy
-            )
-        else:
-            obligations.spoleczne_base = Decimal('0.00')
-
-        # Расчет взноса на медицинское страхование (Składka Zdrowotna) - платится ВСЕГДА
-        min_zdrowotna = (min_wage * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        tax_regime = profile.jdg_tax_regime or TaxRegime.SKALA
-        
-        if tax_regime == TaxRegime.SKALA:
-            calc_zdrowotna = (jdg_monthly_profit * ZUSConstants.RATE_ZDROWOTNA_SKALA).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            obligations.skladka_zdrowotna = max(min_zdrowotna, calc_zdrowotna)
-            obligations.zdrowotna_base = max(min_wage, jdg_monthly_profit)
-        elif tax_regime == TaxRegime.LINIOWY:
-            calc_zdrowotna = (jdg_monthly_profit * ZUSConstants.RATE_ZDROWOTNA_LINIOWY).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            obligations.skladka_zdrowotna = max(min_zdrowotna, calc_zdrowotna)
-            obligations.zdrowotna_base = max(min_wage, jdg_monthly_profit)
-        else: # RYCZALT
-            # Фиксированная база в зависимости от порога годовой выручки (по умолчанию базовый порог)
-            ryczalt_base = (avg_wage * Decimal('0.60')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            obligations.zdrowotna_base = ryczalt_base
-            obligations.skladka_zdrowotna = (ryczalt_base * Decimal('0.09')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-        # Итоговая сумма к уплате
-        obligations.total_zus_do_zaplaty = obligations.total_spoleczne + obligations.skladka_zdrowotna
-        
-        # Формуляры к подаче
-        if stage == ZUSStage.ULGA_NA_START or has_zbieg:
-            obligations.forms_required = ["ZUS DRA", "ZUS ZZA"]
-        else:
-            obligations.forms_required = ["ZUS DRA", "ZUS RCA"]
-            
-        return obligations

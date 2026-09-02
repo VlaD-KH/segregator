@@ -9,17 +9,19 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from src.segregator.cli import app
-from src.segregator.domain.models import (
+from segregator.cli import app
+from segregator.domain.models import (
     DataSource,
+    DocumentType,
+    AgentDecision,
     DocumentFacts,
     ExtractedField,
     TaxpayerProfile,
     EmploymentPeriod,
-    EmploymentType,
+    EmploymentTypeKind,
     TaxRegime,
 )
-from src.segregator.service import SegregatorService
+from segregator.service import SegregatorService
 
 
 @pytest.fixture
@@ -33,7 +35,7 @@ def service_test_env(tmp_path):
         jdg_tax_regime=TaxRegime.SKALA,
         employment_history=[
             EmploymentPeriod(
-                emp_type=EmploymentType.JDG,
+                emp_type=EmploymentTypeKind.JDG,
                 start_date=date(2025, 10, 1)
             )
         ]
@@ -49,14 +51,17 @@ def test_service_process_document_and_route(service_test_env):
     doc_file.write_text("Test invoice content", encoding="utf-8")
     
     custom_facts = DocumentFacts(
-        doc_type="faktura",
-        seller_nip=ExtractedField(value="5252344078", source=DataSource.OCR),
-        seller_name=ExtractedField(value="PKN ORLEN S.A.", source=DataSource.OCR),
-        doc_number=ExtractedField(value="FV/2025/11/100", source=DataSource.OCR),
-        doc_date=ExtractedField(value=date(2025, 11, 10), source=DataSource.OCR),
-        netto=ExtractedField(value=Decimal('1000.00'), source=DataSource.OCR),
-        vat=ExtractedField(value=Decimal('230.00'), source=DataSource.OCR),
-        brutto=ExtractedField(value=Decimal('1230.00'), source=DataSource.OCR)
+        doc_type=DocumentType.FAKTURA_KOSZTOWA,
+        fields={
+            "nip_sprzedawcy": ExtractedField(value="5252344078", source=DataSource.OCR, confidence=0.98),
+            "nazwa_sprzedawcy": ExtractedField(value="PKN ORLEN S.A.", source=DataSource.OCR, confidence=0.98),
+            "nr_dokumentu": ExtractedField(value="FV/2025/11/100", source=DataSource.OCR, confidence=0.98),
+            "data_wystawienia": ExtractedField(value="2025-11-10", source=DataSource.OCR, confidence=0.98),
+            "netto": ExtractedField(value=1000.0, source=DataSource.OCR, confidence=0.98),
+            "vat": ExtractedField(value=230.0, source=DataSource.OCR, confidence=0.98),
+            "brutto": ExtractedField(value=1230.0, source=DataSource.OCR, confidence=0.98),
+        },
+        decision=AgentDecision.OK
     )
 
     # 2. Обработка через сервис
@@ -72,9 +77,11 @@ def test_service_process_document_and_route(service_test_env):
     assert xlsx_file.stat().st_size > 0
 
 
-def test_cli_demo_run():
+def test_cli_demo_run(tmp_path, monkeypatch):
+    """Тест demo-run с гарантированной изоляцией в tmp_path."""
+    monkeypatch.setenv("SEGREGATOR_ARCHIVE_DIR", str(tmp_path))
     runner = CliRunner()
     result = runner.invoke(app, ["demo-run"])
     assert result.exit_code == 0
-    assert "SEGREGATOR: ДЕМОНСТРАЦИЯ МУЛЬТИАГЕНТНОГО КОНВЕЙЕРА" in result.output
+    assert "SEGREGATOR — ДЕМОНСТРАЦИОННЫЙ ПРОГОН" in result.output
     assert "ДЕМОНСТРАЦИОННЫЙ ПРОГОН УСПЕШНО ЗАВЕРШЕН" in result.output

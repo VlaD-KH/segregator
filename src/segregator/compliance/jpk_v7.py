@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 import xml.etree.ElementTree as ET
 from pydantic import BaseModel, Field
 
-from src.segregator.domain.models import DocumentFacts, BookingProposal
+from segregator.domain.models import DocumentFacts, BookingProposal
 
 
 class JPKSalesRecord(BaseModel):

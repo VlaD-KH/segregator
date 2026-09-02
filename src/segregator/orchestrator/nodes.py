@@ -8,19 +8,23 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Dict, Any
 
-from src.segregator.orchestrator.state import AccountingGraphState, AuditEntry
-from src.segregator.domain.models import (
+from segregator.orchestrator.state import AccountingGraphState, AuditEntry
+from segregator.domain.models import (
     DataSource,
+    DocumentType,
+    AgentDecision,
+    PeriodDateBasis,
+    EmploymentTypeKind,
     DocumentFacts,
     ExtractedField,
     BookingProposal,
     TaxRegime,
     ZUSStage,
 )
-from src.segregator.domain.zus import ZUSCalculator
-from src.segregator.tax.pit import PITCalculator
-from src.segregator.accounting.kpir import KPiREngine
-from src.segregator.domain.invariants import InvariantEngine
+from segregator.domain.zus import ZUSCalculator
+from segregator.tax.pit import PITCalculator
+from segregator.accounting.kpir import KPiREngine
+from segregator.domain.invariants import InvariantEngine
 
 
 def step0_reconciler_node(state: AccountingGraphState) -> AccountingGraphState:
@@ -70,37 +74,41 @@ def agent01_ingest_node(state: AccountingGraphState) -> AccountingGraphState:
     else:
         # Модель парсинга KSeF / OCR по умолчанию
         facts = DocumentFacts(
-            doc_type="faktura",
-            ksef_reference_number="5252344078-20260831-0102030405-AB",
-            seller_nip=ExtractedField(value="5252344078", source=DataSource.KSEF, confidence=1.0),
-            seller_name=ExtractedField(value="PKN ORLEN S.A.", source=DataSource.KSEF, confidence=1.0),
-            buyer_nip=ExtractedField(value="1234567890", source=DataSource.KSEF, confidence=1.0),
-            doc_number=ExtractedField(value="FV/2026/08/001", source=DataSource.KSEF, confidence=1.0),
-            doc_date=ExtractedField(value=state.target_date, source=DataSource.KSEF, confidence=1.0),
-            netto=ExtractedField(value=Decimal('1000.00'), source=DataSource.KSEF, confidence=1.0),
-            vat=ExtractedField(value=Decimal('230.00'), source=DataSource.KSEF, confidence=1.0),
-            brutto=ExtractedField(value=Decimal('1230.00'), source=DataSource.KSEF, confidence=1.0),
-            decision="ok"
+            doc_type=DocumentType.FAKTURA_KOSZTOWA,
+            fields={
+                "nip_sprzedawcy": ExtractedField(value="5252344078", source=DataSource.KSEF, confidence=1.0),
+                "nazwa_sprzedawcy": ExtractedField(value="PKN ORLEN S.A.", source=DataSource.KSEF, confidence=1.0),
+                "nip_nabywcy": ExtractedField(value="1234567890", source=DataSource.KSEF, confidence=1.0),
+                "nr_dokumentu": ExtractedField(value="FV/2026/08/001", source=DataSource.KSEF, confidence=1.0),
+                "data_wystawienia": ExtractedField(value=state.target_date.isoformat(), source=DataSource.KSEF, confidence=1.0),
+                "data_sprzedazy": ExtractedField(value=state.target_date.isoformat(), source=DataSource.KSEF, confidence=1.0),
+                "termin_platnosci": ExtractedField(value=state.target_date.isoformat(), source=DataSource.KSEF, confidence=1.0),
+                "netto": ExtractedField(value=1000.0, source=DataSource.KSEF, confidence=1.0),
+                "vat": ExtractedField(value=230.0, source=DataSource.KSEF, confidence=1.0),
+                "brutto": ExtractedField(value=1230.0, source=DataSource.KSEF, confidence=1.0),
+                "stawka_vat": ExtractedField(value=0.23, source=DataSource.KSEF, confidence=1.0),
+                "waluta": ExtractedField(value="PLN", source=DataSource.KSEF, confidence=1.0)
+            },
+            decision=AgentDecision.OK
         )
 
     # Верификация математического инварианта документа (Netto + VAT == Brutto)
-    if facts.netto and facts.vat and facts.brutto:
-        netto_val = Decimal(str(facts.netto.value))
-        vat_val = Decimal(str(facts.vat.value))
-        brutto_val = Decimal(str(facts.brutto.value))
+    netto_val = facts.netto
+    vat_val = facts.vat
+    brutto_val = facts.brutto
+    if netto_val > 0 and vat_val > 0 and brutto_val > 0:
         inv_check = InvariantEngine.check_document_math(netto_val, vat_val, brutto_val)
-        
         if not inv_check.passed:
-            facts.decision = "escalate"
-            facts.escalation_reason = inv_check.message
+            facts.decision = AgentDecision.ESCALATE
+            facts.why = inv_check.message
             state.escalation_reason = inv_check.message
 
     state.facts = facts
     state.audit_trail.append(AuditEntry(
         node_name="Agent_01_Ingest",
         action="FACTS_EXTRACTED",
-        details=f"Извлечены факты {facts.doc_type} #{facts.doc_number.value if facts.doc_number else ''}. Решение: {facts.decision}.",
-        confidence=facts.netto.confidence if facts.netto else 1.0
+        details=f"Извлечены факты {facts.doc_type.value} #{facts.doc_number}. Решение: {facts.decision.value}.",
+        confidence=facts.fields["netto"].confidence if "netto" in facts.fields else 1.0
     ))
     return state
 
@@ -114,8 +122,8 @@ def agent02_accounting_node(state: AccountingGraphState) -> AccountingGraphState
         return state
 
     facts = state.facts
-    seller_name = str(facts.seller_name.value).lower() if (facts.seller_name and facts.seller_name.value) else ""
-    doc_nr = str(facts.doc_number.value).lower() if (facts.doc_number and facts.doc_number.value) else ""
+    seller_name = facts.seller_name.lower()
+    doc_nr = facts.doc_number.lower()
     
     # Правило классификации расходов на автомобиль
     is_car_expense = "orlen" in seller_name or "paliwo" in seller_name or "bp" in seller_name or "shell" in seller_name
@@ -123,31 +131,44 @@ def agent02_accounting_node(state: AccountingGraphState) -> AccountingGraphState
     if is_car_expense:
         proposal = BookingProposal(
             category="Koszty eksploatacji pojazdu (Paliwo)",
+            subcategory="paliwo",
             kpir_column=13,
-            vehicle_usage_type="mixed",
-            kup_deductible_ratio=Decimal('0.75'),
-            vat_deductible_ratio=Decimal('0.50'),
+            vat_rate=0.23,
+            vat_deduction_ratio=0.50,
+            pit_cost_ratio=0.75,
+            period_date=facts.doc_date.isoformat() if facts.doc_date else None,
+            period_date_basis=PeriodDateBasis.DATA_WYSTAWIENIA,
             basis="rule:car_mixed_75",
-            confidence=0.98
+            confidence=0.98,
+            decision=AgentDecision.OK
         )
-    elif facts.doc_type == "faktura_sprzedazy" or "fv/sprzedaz" in doc_nr:
+    elif facts.doc_type == DocumentType.FAKTURA_SPRZEDAZY or "fv/sprzedaz" in doc_nr:
         proposal = BookingProposal(
             category="Przychody z usług IT / B2B",
+            subcategory="sprzedaz",
             kpir_column=7,
-            kup_deductible_ratio=Decimal('1.00'),
-            vat_deductible_ratio=Decimal('1.00'),
+            vat_rate=0.23,
+            vat_deduction_ratio=1.0,
+            pit_cost_ratio=1.0,
+            period_date=facts.doc_date.isoformat() if facts.doc_date else None,
+            period_date_basis=PeriodDateBasis.DATA_WYSTAWIENIA,
             basis="rule:sales_col_7",
-            confidence=1.0
+            confidence=1.0,
+            decision=AgentDecision.OK
         )
     else:
         # Стандартные операционные расходы
         proposal = BookingProposal(
             category="Koszty operacyjne i usługi obce",
             kpir_column=13,
-            kup_deductible_ratio=Decimal('1.00'),
-            vat_deductible_ratio=Decimal('1.00'),
+            vat_rate=0.23,
+            vat_deduction_ratio=1.0,
+            pit_cost_ratio=1.0,
+            period_date=facts.doc_date.isoformat() if facts.doc_date else None,
+            period_date_basis=PeriodDateBasis.DATA_WYSTAWIENIA,
             basis="rule:general_col_13",
-            confidence=0.96
+            confidence=0.96,
+            decision=AgentDecision.OK
         )
 
     state.proposal = proposal
@@ -165,7 +186,7 @@ def agent02_accounting_node(state: AccountingGraphState) -> AccountingGraphState
     state.audit_trail.append(AuditEntry(
         node_name="Agent_02_Accounting",
         action="BOOKED_TO_KPIR",
-        details=f"Документ отнесен в KPiR Колонку {proposal.kpir_column} (KUP: {proposal.kup_deductible_ratio*100}%).",
+        details=f"Документ отнесен в KPiR Колонку {proposal.kpir_column} (KUP: {(proposal.pit_cost_ratio or 1.0)*100}%).",
         confidence=proposal.confidence
     ))
     return state
@@ -183,7 +204,7 @@ def agent03_tax_node(state: AccountingGraphState) -> AccountingGraphState:
     target_date = state.target_date
 
     # 1. Расчет ZUS (если есть профиль с периодом JDG)
-    if profile and any(p.emp_type.value == "JDG" for p in profile.employment_history):
+    if profile and any(p.emp_type == EmploymentTypeKind.JDG for p in profile.employment_history):
         # Оценка прибыли за месяц по KPiR
         monthly_profit = Decimal('10000.00')
         if state.kpir_entry:
@@ -259,11 +280,11 @@ def human_gate_condition(state: AccountingGraphState) -> str:
         return "end"
 
     # Проверка решения Agent-01
-    if state.facts and state.facts.decision == "escalate":
+    if state.facts and state.facts.decision == AgentDecision.ESCALATE:
         return "human_review"
 
     # Проверка уверенности классификации Agent-02
-    if state.proposal and state.proposal.confidence < 0.95:
+    if state.proposal and (state.proposal.confidence < 0.95 or state.proposal.decision == AgentDecision.ESCALATE):
         state.escalation_reason = f"Низкая уверенность классификации категории ({state.proposal.confidence*100}% < 95%)"
         return "human_review"
 

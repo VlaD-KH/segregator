@@ -1,15 +1,11 @@
 """
-src/segregator/advisor package initialization.
+segregator.advisor package exports.
 """
 
-from src.segregator.advisor.doradca import (
-    RegimeScenario,
-    AdvisoryReport,
+from segregator.advisor.doradca import (
     AgentDoradca,
 )
 
 __all__ = [
-    "RegimeScenario",
-    "AdvisoryReport",
     "AgentDoradca",
 ]

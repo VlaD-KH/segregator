@@ -6,7 +6,7 @@ tests/test_advisor_doradca.py
 from decimal import Decimal
 import pytest
 
-from src.segregator.advisor.doradca import AgentDoradca
+from segregator.advisor.doradca import AgentDoradca
 
 
 def test_agent_doradca_regime_comparison():
@@ -25,17 +25,17 @@ def test_agent_doradca_regime_comparison():
     assert len(report.scenarios) == 3
     assert len(report.assumptions) >= 1
     assert len(report.unknowns) >= 1
-    assert "Nie stanowią one porady podatkowej" in report.disclaimer
+    assert "doradztwo podatkowe" in report.disclaimer
 
     # 2. Проверка сценариев
-    skala_sc = next(s for s in report.scenarios if "Skala" in s.regime_name)
-    liniowy_sc = next(s for s in report.scenarios if "liniowy" in s.regime_name)
-    ryczalt_sc = next(s for s in report.scenarios if "Ryczałt" in s.regime_name)
+    skala_sc = next(s for s in report.scenarios if "Skala" in s.name)
+    liniowy_sc = next(s for s in report.scenarios if "liniowy" in s.name)
+    ryczalt_sc = next(s for s in report.scenarios if "Ryczałt" in s.name)
 
-    assert skala_sc.gross_revenue == Decimal('200000.00')
-    assert skala_sc.net_income_on_hand > Decimal('0.00')
-    assert liniowy_sc.pit_due > Decimal('0.00')
-    assert ryczalt_sc.pit_due > Decimal('0.00')
+    assert skala_sc.figures["przychod"] == 200000.00
+    assert skala_sc.figures["zysk_netto"] > 0.00
+    assert liniowy_sc.figures["podatek_pit"] > 0.00
+    assert ryczalt_sc.figures["podatek_pit"] > 0.00
 
     # 3. Проверка анализа 120k zł (200k - 40k = 160k > 120k -> порог превышен)
-    assert "przekraczasz I próg skali" in report.threshold_120k_analysis
+    assert "Przekroczono próg 120 000 zł" in report.note

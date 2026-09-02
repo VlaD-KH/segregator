@@ -7,45 +7,49 @@ from datetime import date
 from decimal import Decimal
 import pytest
 
-from src.segregator.domain.models import (
+from segregator.domain.models import (
     EmploymentPeriod,
-    EmploymentType,
+    EmploymentTypeKind,
     TaxpayerProfile,
     TaxRegime,
     ZUSStage,
+    DocumentType,
+    AgentDecision,
     DocumentFacts,
     ExtractedField,
     DataSource,
     BookingProposal,
 )
-from src.segregator.domain.zus import ZUSCalculator, ZUSConstants
+from segregator.domain.zus import ZUSCalculator, ZUSConstants
 
 
 def test_document_facts_and_booking_proposal():
     """Тест создания и валидации контрактов DocumentFacts и BookingProposal."""
     facts = DocumentFacts(
-        doc_type="faktura",
-        ksef_reference_number="5252344078-20260831-0102030405-AB",
-        seller_nip=ExtractedField(value="5252344078", source=DataSource.KSEF, confidence=1.0),
-        netto=ExtractedField(value=Decimal('10000.00'), source=DataSource.KSEF, confidence=1.0),
-        vat=ExtractedField(value=Decimal('2300.00'), source=DataSource.KSEF, confidence=1.0),
-        brutto=ExtractedField(value=Decimal('12300.00'), source=DataSource.KSEF, confidence=1.0),
-        decision="ok"
+        doc_type=DocumentType.FAKTURA_KOSZTOWA,
+        fields={
+            "nip_sprzedawcy": ExtractedField(value="5252344078", source=DataSource.KSEF, confidence=1.0),
+            "netto": ExtractedField(value=10000.0, source=DataSource.KSEF, confidence=1.0),
+            "vat": ExtractedField(value=2300.0, source=DataSource.KSEF, confidence=1.0),
+            "brutto": ExtractedField(value=12300.0, source=DataSource.KSEF, confidence=1.0),
+        },
+        decision=AgentDecision.OK
     )
-    assert facts.doc_type == "faktura"
-    assert facts.seller_nip.value == "5252344078"
-    assert facts.netto.value == Decimal('10000.00')
+    assert facts.doc_type == DocumentType.FAKTURA_KOSZTOWA
+    assert facts.seller_nip == "5252344078"
+    assert facts.netto == Decimal('10000.00')
 
     proposal = BookingProposal(
         category="Koszty operacyjne",
         kpir_column=13,
-        vehicle_usage_type="mixed",
-        kup_deductible_ratio=Decimal('0.75'),
-        vat_deductible_ratio=Decimal('0.50'),
-        confidence=1.0
+        pit_cost_ratio=0.75,
+        vat_deduction_ratio=0.50,
+        confidence=1.0,
+        basis="rule:test",
+        decision=AgentDecision.OK
     )
     assert proposal.kpir_column == 13
-    assert proposal.kup_deductible_ratio == Decimal('0.75')
+    assert proposal.pit_cost_ratio == 0.75
 
 
 def test_determine_zus_stage_starting_first_day():
@@ -98,13 +102,13 @@ def test_zbieg_tytulow_with_uop():
         date_of_birth=date(1990, 1, 1),
         employment_history=[
             EmploymentPeriod(
-                emp_type=EmploymentType.UOP,
+                emp_type=EmploymentTypeKind.UOP,
                 start_date=date(2025, 1, 1),
                 end_date=date(2025, 5, 31),
                 monthly_gross_avg=Decimal('8000.00')
             ),
             EmploymentPeriod(
-                emp_type=EmploymentType.JDG,
+                emp_type=EmploymentTypeKind.JDG,
                 start_date=date(2025, 3, 1),
                 end_date=None
             )
@@ -133,7 +137,7 @@ def test_calculate_monthly_obligations_ulga_na_start():
         jdg_tax_regime=TaxRegime.SKALA,
         employment_history=[
             EmploymentPeriod(
-                emp_type=EmploymentType.JDG,
+                emp_type=EmploymentTypeKind.JDG,
                 start_date=date(2025, 10, 1)
             )
         ]
@@ -173,7 +177,7 @@ def test_calculate_monthly_obligations_preferencyjny():
         jdg_tax_regime=TaxRegime.SKALA,
         employment_history=[
             EmploymentPeriod(
-                emp_type=EmploymentType.JDG,
+                emp_type=EmploymentTypeKind.JDG,
                 start_date=date(2024, 1, 1) # Прошло >6 месяцев, действует Preferencyjny
             )
         ]
@@ -194,7 +198,7 @@ def test_calculate_monthly_obligations_preferencyjny():
     assert obligations.wypadkowe == Decimal('23.38')
     assert obligations.fundusz_pracy == Decimal('0.00')
     assert obligations.total_spoleczne == Decimal('442.90')
-    assert "ZUS RCA" in obligations.forms_required
+    assert "ZUS ZUA" in obligations.forms_required
 
 
 def test_calculate_monthly_obligations_zbieg_tytulow():
@@ -209,13 +213,13 @@ def test_calculate_monthly_obligations_zbieg_tytulow():
         jdg_tax_regime=TaxRegime.SKALA,
         employment_history=[
             EmploymentPeriod(
-                emp_type=EmploymentType.UOP,
+                emp_type=EmploymentTypeKind.UOP,
                 start_date=date(2025, 1, 1),
                 end_date=None,
                 monthly_gross_avg=Decimal('7000.00')
             ),
             EmploymentPeriod(
-                emp_type=EmploymentType.JDG,
+                emp_type=EmploymentTypeKind.JDG,
                 start_date=date(2020, 1, 1) # По хронологии Duży ZUS
             )
         ]

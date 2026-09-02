@@ -7,14 +7,14 @@ from datetime import date
 from decimal import Decimal
 import pytest
 
-from src.segregator.domain.models import ZUSObligations, ZUSStage
-from src.segregator.compliance.jpk_v7 import (
+from segregator.domain.models import ZUSObligations, ZUSStage
+from segregator.compliance.jpk_v7 import (
     JPKSalesRecord,
     JPKPurchaseRecord,
     JPKV7MGenerator,
 )
-from src.segregator.compliance.zus_kedu import ZUSKEDUGenerator
-from src.segregator.compliance.xml_validator import ComplianceXMLValidator
+from segregator.compliance.zus_kedu import ZUSKEDUGenerator
+from segregator.compliance.xml_validator import ComplianceXMLValidator
 
 
 def test_jpk_v7m_generation_and_validation():

@@ -9,7 +9,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
-from src.segregator.domain.models import TaxRegime, EmploymentPeriod, EmploymentType
+from segregator.domain.models import TaxRegime, EmploymentPeriod, EmploymentTypeKind
 
 
 class PITConstants:
@@ -57,7 +57,7 @@ class MonthlyTaxResult(BaseModel):
 
 class PayrollResult(BaseModel):
     """Результат расчета заработной платы по UoP или UZ."""
-    emp_type: EmploymentType
+    emp_type: EmploymentTypeKind
     gross_salary: Decimal
     employee_social_zus: Decimal # Складки ZUS работника
     zdrowotna_base: Decimal
@@ -202,7 +202,7 @@ class PITCalculator:
         net_salary = gross_salary - total_social - zdrowotna - advance_pit
 
         return PayrollResult(
-            emp_type=EmploymentType.UOP,
+            emp_type=EmploymentTypeKind.UOP,
             gross_salary=gross_salary,
             employee_social_zus=total_social,
             zdrowotna_base=zdrowotna_base,
@@ -227,7 +227,7 @@ class PITCalculator:
         """
         if is_student_under_26:
             return PayrollResult(
-                emp_type=EmploymentType.UZ,
+                emp_type=EmploymentTypeKind.UZ,
                 gross_salary=gross_salary,
                 employee_social_zus=Decimal('0.00'),
                 zdrowotna_base=Decimal('0.00'),
@@ -259,7 +259,7 @@ class PITCalculator:
         net_salary = gross_salary - total_social - zdrowotna - advance_pit
 
         return PayrollResult(
-            emp_type=EmploymentType.UZ,
+            emp_type=EmploymentTypeKind.UZ,
             gross_salary=gross_salary,
             employee_social_zus=total_social,
             zdrowotna_base=zdrowotna_base,

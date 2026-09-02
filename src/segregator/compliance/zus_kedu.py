@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional
 import xml.etree.ElementTree as ET
 
-from src.segregator.domain.models import ZUSObligations, ZUSStage
+from segregator.domain.models import ZUSObligations, ZUSStage
 
 
 class ZUSKEDUGenerator:
