@@ -10,7 +10,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
-from src.segregator.tax.pit import PITCalculator, PITConstants
+from segregator.tax.pit import PITCalculator, PITConstants
 
 
 class IncomeSourceRecord(BaseModel):

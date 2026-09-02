@@ -1,8 +1,7 @@
-"""CLI-точки входа: `segregator init`, `segregator doctor`, `segregator demo-run`, `segregator process`, `segregator report`."""
+"""CLI-точки входа: `segregator init`, `segregator doctor`, `segregator backfill`, `segregator demo-run`, `segregator process`, `segregator report`."""
 
 from __future__ import annotations
 
-import json
 import platform
 import shutil
 import sys
@@ -18,20 +17,25 @@ from segregator import logging as slog
 from segregator import paths
 from segregator.config import Settings, format_validation_error
 from segregator.db import migrate
-from src.segregator.domain.models import (
+from segregator.domain.models import (
     DataSource,
+    DocumentType,
+    AgentDecision,
     DocumentFacts,
     ExtractedField,
     EmploymentPeriod,
-    EmploymentType,
+    EmploymentTypeKind,
     TaxpayerProfile,
     TaxRegime,
 )
-from src.segregator.service import SegregatorService
-from src.segregator.compliance.pit36 import PIT36Consolidator, IncomeSourceRecord, PITBAttachment
+from segregator.service import SegregatorService
+from segregator.compliance.pit36 import PIT36Consolidator, IncomeSourceRecord, PITBAttachment
 
 
 def _ensure_utf8_console() -> None:
+    # Консольная кодовая страница Windows не гарантированно содержит
+    # кириллицу (например, польская региональная локаль даёт cp1250) —
+    # без этого русский вывод CLI падает с UnicodeEncodeError.
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             try:
@@ -91,6 +95,8 @@ def backfill(
         typer.echo(f"Экспорт не найден: {error}")
         raise typer.Exit(code=1)
     except ExportPathError as error:
+        # Путь из данных увёл за пределы экспорта — это не «плохой файл»,
+        # а повод остановиться и посмотреть, что за экспорт нам подсунули.
         typer.echo(f"Экспорт отклонён: {error}")
         raise typer.Exit(code=1)
 
@@ -124,6 +130,8 @@ def _check_llm(settings: Settings) -> tuple[bool, str, str]:
 
 def _check_writable(label: str, target: object) -> tuple[bool, str, str]:
     import os
+    from pathlib import Path
+
     path = Path(target)
     check_path = path if path.exists() else path.parent
     if check_path.exists() and os.access(check_path, os.W_OK):
@@ -132,6 +140,8 @@ def _check_writable(label: str, target: object) -> tuple[bool, str, str]:
 
 
 def _check_readable(label: str, target: object) -> tuple[bool, str, str]:
+    from pathlib import Path
+
     path = Path(target)
     if path.is_dir():
         return True, label, str(path)
@@ -160,44 +170,42 @@ def doctor() -> None:
         raise typer.Exit(code=1)
 
 
-# =========================================================================
-# НОВЫЕ ИНТЕГРАЦИОННЫЕ ТОЧКИ ВХОДА (Agent Business Logic & Demo)
-# =========================================================================
-
 @app.command(name="demo-run")
 def demo_run() -> None:
     """
-    Интерактивный турбо-прогон мультиагентной системы:
-    1. Инициализация БД и структуры папок.
-    2. Прогон синтетического пакета документов через агентов (KSeF, Топливо 75%, Ошибка, PIT-11).
-    3. Раскладка в archiwum/, запись в SQLite и генерация XLSX-реестра и PIT-36.
+    Запустить демонстрационный прогон:
+    - Обработка 3 входящих документов (продажи, расходы авто 75%, ошибка с Human Gate)
+    - Генерация KPiR записей и расчет ZUS
+    - Формирование официального XLSX реестра KPiR
+    - Консолидация годового отчета PIT-36 за 2025 год
     """
     settings = _load_settings_or_exit()
-    service = SegregatorService(workspace_root=settings.archive_dir)
+    slog.configure_logging(settings.archive_dir / "logs")
+    log = slog.get_logger("cli.demo_run")
 
     typer.secho("\n=======================================================", fg=typer.colors.CYAN, bold=True)
-    typer.secho("  SEGREGATOR: ДЕМОНСТРАЦИЯ МУЛЬТИАГЕНТНОГО КОНВЕЙЕРА   ", fg=typer.colors.WHITE, bg=typer.colors.BLUE, bold=True)
+    typer.secho("   SEGREGATOR — ДЕМОНСТРАЦИОННЫЙ ПРОГОН СИСТЕМЫ       ", fg=typer.colors.WHITE, bg=typer.colors.BLUE, bold=True)
     typer.secho("=======================================================\n", fg=typer.colors.CYAN, bold=True)
 
-    # Тестовый профиль пользователя (Кейс 2025: UoP -> UZ -> JDG)
+    service = SegregatorService(workspace_root=settings.archive_dir)
+
     profile = TaxpayerProfile(
-        pesel_masked="880512*****",
+        pesel_masked="900101*****",
         nip="5252344078",
         full_name_masked="Jan Kowalski",
-        date_of_birth=date(1988, 5, 12),
-        jdg_tax_regime=TaxRegime.SKALA,
+        date_of_birth=date(1990, 1, 1),
         is_vat_payer=True,
+        jdg_tax_regime=TaxRegime.SKALA,
         employment_history=[
-            EmploymentPeriod(emp_type=EmploymentType.UOP, start_date=date(2025, 1, 1), end_date=date(2025, 5, 31), monthly_gross_avg=Decimal('10000.00')),
-            EmploymentPeriod(emp_type=EmploymentType.UZ, start_date=date(2025, 6, 1), end_date=date(2025, 9, 30), monthly_gross_avg=Decimal('8000.00')),
-            EmploymentPeriod(emp_type=EmploymentType.JDG, start_date=date(2025, 10, 1), end_date=None)
+            EmploymentPeriod(
+                emp_type=EmploymentTypeKind.JDG,
+                start_date=date(2025, 10, 1),
+                monthly_gross_avg=Decimal('15000.00'),
+                payer_nip="5252344078"
+            )
         ]
     )
 
-    typer.echo(f"👤 Профиль налогоплательщика: NIP {profile.nip}, PESEL {profile.pesel_masked} (JDG на Skala Podatkowa)")
-    typer.echo("🏢 История: Янв-Май (UoP) ➔ Июн-Сен (UZ) ➔ Окт-Дек (JDG + Ulga na start)\n")
-
-    # Создание временных тестовых файлов для демонстрации
     demo_tmp_dir = settings.archive_dir / "demo_temp"
     demo_tmp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -205,40 +213,55 @@ def demo_run() -> None:
     f1_path = demo_tmp_dir / "FV_2025_11_001_Sprzedaz.pdf"
     f1_path.write_text("Faktura Sprzedazy IT B2B: Netto 12000.00 PLN, VAT 2760.00 PLN", encoding="utf-8")
     f1_facts = DocumentFacts(
-        doc_type="faktura_sprzedazy",
-        doc_number=ExtractedField(value="FV/2025/11/001", source=DataSource.KSEF),
-        doc_date=ExtractedField(value=date(2025, 11, 10), source=DataSource.KSEF),
-        seller_name=ExtractedField(value="Jan Kowalski IT", source=DataSource.KSEF),
-        seller_nip=ExtractedField(value="5252344078", source=DataSource.KSEF),
-        netto=ExtractedField(value=Decimal('12000.00'), source=DataSource.KSEF),
-        vat=ExtractedField(value=Decimal('2760.00'), source=DataSource.KSEF),
-        brutto=ExtractedField(value=Decimal('14760.00'), source=DataSource.KSEF)
+        doc_type=DocumentType.FAKTURA_SPRZEDAZY,
+        fields={
+            "nr_dokumentu": ExtractedField(value="FV/2025/11/001", source=DataSource.KSEF, confidence=1.0),
+            "data_wystawienia": ExtractedField(value="2025-11-10", source=DataSource.KSEF, confidence=1.0),
+            "nazwa_sprzedawcy": ExtractedField(value="Jan Kowalski IT", source=DataSource.KSEF, confidence=1.0),
+            "nip_sprzedawcy": ExtractedField(value="5252344078", source=DataSource.KSEF, confidence=1.0),
+            "netto": ExtractedField(value=12000.0, source=DataSource.KSEF, confidence=1.0),
+            "vat": ExtractedField(value=2760.0, source=DataSource.KSEF, confidence=1.0),
+            "brutto": ExtractedField(value=14760.0, source=DataSource.KSEF, confidence=1.0),
+            "stawka_vat": ExtractedField(value=0.23, source=DataSource.KSEF, confidence=1.0),
+            "waluta": ExtractedField(value="PLN", source=DataSource.KSEF, confidence=1.0)
+        },
+        decision=AgentDecision.OK
     )
 
     # 2. Документ 2: Чек/Фактура на топливо Orlen (смешанное авто 75% KUP / 50% VAT)
     f2_path = demo_tmp_dir / "FV_2025_11_042_Orlen_Paliwo.pdf"
     f2_path.write_text("PKN ORLEN Faktura Paliwo: Netto 1000.00 PLN, VAT 230.00 PLN, Brutto 1230.00 PLN", encoding="utf-8")
     f2_facts = DocumentFacts(
-        doc_type="faktura",
-        doc_number=ExtractedField(value="FV/ORLEN/2025/11/042", source=DataSource.OCR),
-        doc_date=ExtractedField(value=date(2025, 11, 15), source=DataSource.OCR),
-        seller_name=ExtractedField(value="PKN ORLEN S.A.", source=DataSource.OCR),
-        netto=ExtractedField(value=Decimal('1000.00'), source=DataSource.OCR),
-        vat=ExtractedField(value=Decimal('230.00'), source=DataSource.OCR),
-        brutto=ExtractedField(value=Decimal('1230.00'), source=DataSource.OCR)
+        doc_type=DocumentType.FAKTURA_KOSZTOWA,
+        fields={
+            "nr_dokumentu": ExtractedField(value="FV/ORLEN/2025/11/042", source=DataSource.OCR, confidence=0.98),
+            "data_wystawienia": ExtractedField(value="2025-11-15", source=DataSource.OCR, confidence=0.98),
+            "nazwa_sprzedawcy": ExtractedField(value="PKN ORLEN S.A.", source=DataSource.OCR, confidence=0.98),
+            "netto": ExtractedField(value=1000.0, source=DataSource.OCR, confidence=0.98),
+            "vat": ExtractedField(value=230.0, source=DataSource.OCR, confidence=0.98),
+            "brutto": ExtractedField(value=1230.0, source=DataSource.OCR, confidence=0.98),
+            "stawka_vat": ExtractedField(value=0.23, source=DataSource.OCR, confidence=0.98),
+            "waluta": ExtractedField(value="PLN", source=DataSource.OCR, confidence=1.0)
+        },
+        decision=AgentDecision.OK
     )
 
     # 3. Документ 3: Фактура с математической ошибкой (Human-in-the-Loop тест)
     f3_path = demo_tmp_dir / "FV_2025_11_999_Blad_Matematyczny.pdf"
     f3_path.write_text("Faktura z bledem: Netto 1000.00 PLN, VAT 230.00 PLN, Brutto 1500.00 PLN (Błąd!)", encoding="utf-8")
     f3_facts = DocumentFacts(
-        doc_type="faktura",
-        doc_number=ExtractedField(value="FV/BLAD/999", source=DataSource.OCR),
-        doc_date=ExtractedField(value=date(2025, 11, 20), source=DataSource.OCR),
-        seller_name=ExtractedField(value="Dostawca X", source=DataSource.OCR),
-        netto=ExtractedField(value=Decimal('1000.00'), source=DataSource.OCR),
-        vat=ExtractedField(value=Decimal('230.00'), source=DataSource.OCR),
-        brutto=ExtractedField(value=Decimal('1500.00'), source=DataSource.OCR) # Ошибка!
+        doc_type=DocumentType.FAKTURA_KOSZTOWA,
+        fields={
+            "nr_dokumentu": ExtractedField(value="FV/BLAD/999", source=DataSource.OCR, confidence=0.95),
+            "data_wystawienia": ExtractedField(value="2025-11-20", source=DataSource.OCR, confidence=0.95),
+            "nazwa_sprzedawcy": ExtractedField(value="Dostawca X", source=DataSource.OCR, confidence=0.95),
+            "netto": ExtractedField(value=1000.0, source=DataSource.OCR, confidence=0.95),
+            "vat": ExtractedField(value=230.0, source=DataSource.OCR, confidence=0.95),
+            "brutto": ExtractedField(value=1500.0, source=DataSource.OCR, confidence=0.95),
+            "stawka_vat": ExtractedField(value=0.23, source=DataSource.OCR, confidence=0.95),
+            "waluta": ExtractedField(value="PLN", source=DataSource.OCR, confidence=1.0)
+        },
+        decision=AgentDecision.OK
     )
 
     docs_to_run = [
@@ -255,7 +278,7 @@ def demo_run() -> None:
             typer.secho(f"  ✓ Статус: COMPLETED", fg=typer.colors.GREEN, bold=True)
             if res_state.proposal:
                 typer.echo(f"  📋 KPiR: Колонка {res_state.proposal.kpir_column} | Категория: {res_state.proposal.category}")
-                typer.echo(f"  🚗 Автомобиль: KUP={res_state.proposal.kup_deductible_ratio*100}%, VAT={res_state.proposal.vat_deductible_ratio*100}%")
+                typer.echo(f"  🚗 Автомобиль: KUP={(res_state.proposal.pit_cost_ratio or 1.0)*100}%, VAT={(res_state.proposal.vat_deduction_ratio or 1.0)*100}%")
             if res_state.kpir_entry:
                 typer.echo(f"  💰 Проводка в KPiR: Доход={res_state.kpir_entry.col_7_przychody} zł, Расход (KUP)={res_state.kpir_entry.col_14_razem_wydatki} zł")
             if res_state.zus_obligations:
@@ -327,7 +350,7 @@ def process(
         nip="5252344078",
         date_of_birth=date(1990, 1, 1),
         jdg_tax_regime=TaxRegime.SKALA,
-        employment_history=[EmploymentPeriod(emp_type=EmploymentType.JDG, start_date=date(2025, 1, 1))]
+        employment_history=[EmploymentPeriod(emp_type=EmploymentTypeKind.JDG, start_date=date(2025, 1, 1))]
     )
 
     typer.echo(f"Обработка документа: {file_path.name}...")

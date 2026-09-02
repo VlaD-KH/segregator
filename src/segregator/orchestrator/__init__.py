@@ -1,9 +1,9 @@
 """
-src/segregator/orchestrator package initialization.
+segregator.orchestrator package exports.
 """
 
-from src.segregator.orchestrator.state import AccountingGraphState, AuditEntry
-from src.segregator.orchestrator.nodes import (
+from segregator.orchestrator.state import AccountingGraphState, AuditEntry
+from segregator.orchestrator.nodes import (
     step0_reconciler_node,
     agent01_ingest_node,
     agent02_accounting_node,
@@ -12,7 +12,7 @@ from src.segregator.orchestrator.nodes import (
     agent04_compliance_node,
     human_gate_condition,
 )
-from src.segregator.orchestrator.graph import (
+from segregator.orchestrator.graph import (
     StateGraph,
     CompiledGraph,
     build_accounting_graph,

@@ -7,17 +7,19 @@ from datetime import date
 from decimal import Decimal
 import pytest
 
-from src.segregator.domain.models import (
+from segregator.domain.models import (
     TaxRegime,
     DocumentFacts,
     ExtractedField,
     DataSource,
+    DocumentType,
+    AgentDecision,
     BookingProposal,
-    EmploymentType,
+    EmploymentTypeKind,
 )
-from src.segregator.tax.pit import PITCalculator, PITConstants
-from src.segregator.accounting.kpir import KPiREngine, KPiRColumn
-from src.segregator.domain.invariants import InvariantEngine
+from segregator.tax.pit import PITCalculator, PITConstants
+from segregator.accounting.kpir import KPiREngine, KPiRColumn
+from segregator.domain.invariants import InvariantEngine
 
 
 def test_calculate_skala_tax_brackets():
@@ -102,21 +104,26 @@ def test_kpir_engine_mixed_vehicle_booking():
     - В KUP (колонка 13) идет 75% от 1115.00 zł = 836.25 zł
     """
     facts = DocumentFacts(
-        doc_type="faktura",
-        doc_number=ExtractedField(value="FV/2026/08/100", source=DataSource.KSEF),
-        doc_date=ExtractedField(value=date(2026, 8, 15), source=DataSource.KSEF),
-        seller_name=ExtractedField(value="PKN ORLEN", source=DataSource.KSEF),
-        netto=ExtractedField(value=Decimal('1000.00'), source=DataSource.KSEF),
-        vat=ExtractedField(value=Decimal('230.00'), source=DataSource.KSEF),
-        brutto=ExtractedField(value=Decimal('1230.00'), source=DataSource.KSEF)
+        doc_type=DocumentType.FAKTURA_KOSZTOWA,
+        fields={
+            "nr_dokumentu": ExtractedField(value="FV/2026/08/100", source=DataSource.KSEF, confidence=1.0),
+            "data_wystawienia": ExtractedField(value="2026-08-15", source=DataSource.KSEF, confidence=1.0),
+            "nazwa_sprzedawcy": ExtractedField(value="PKN ORLEN", source=DataSource.KSEF, confidence=1.0),
+            "netto": ExtractedField(value=1000.0, source=DataSource.KSEF, confidence=1.0),
+            "vat": ExtractedField(value=230.0, source=DataSource.KSEF, confidence=1.0),
+            "brutto": ExtractedField(value=1230.0, source=DataSource.KSEF, confidence=1.0),
+        },
+        decision=AgentDecision.OK
     )
 
     proposal = BookingProposal(
         category="Paliwo do samochodu",
         kpir_column=13,
-        vehicle_usage_type="mixed",
-        kup_deductible_ratio=Decimal('0.75'),
-        vat_deductible_ratio=Decimal('0.50')
+        pit_cost_ratio=0.75,
+        vat_deduction_ratio=0.50,
+        confidence=1.0,
+        basis="rule:car",
+        decision=AgentDecision.OK
     )
 
     entry = KPiREngine.book_document(facts=facts, proposal=proposal, is_company_vat_payer=True)

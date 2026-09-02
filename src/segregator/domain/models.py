@@ -1,27 +1,42 @@
 """
 src/segregator/domain/models.py
-Доменные модели и типизированные контракты данных для мультиагентной системы Segregator.
-Все числовые финансовые значения строго типизированы через Decimal.
+Строгие доменные модели и контракты мультиагентной системы Segregator (Польша).
+100% совместимость с JSON-схемами в agents/schemas/*.json (draft 2020-12).
 """
 
-from datetime import date, datetime
+from __future__ import annotations
+
+import re
+from datetime import date
 from decimal import Decimal
 from enum import Enum
-from typing import Dict, List, Optional, Union
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any, Dict, List, Optional, Union
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-# ==========================================
-# 1. ИСТОЧНИКИ ДАННЫХ И ИЗВЛЕЧЕННЫЕ ПОЛЯ
-# ==========================================
+# =========================================================================
+# ENUMS & CONSTANTS
+# =========================================================================
+
+class DocumentType(str, Enum):
+    """Строгий enum типов документов согласно agents/schemas/document_facts.json."""
+    FAKTURA_SPRZEDAZY = "faktura_sprzedazy"
+    FAKTURA_KOSZTOWA = "faktura_kosztowa"
+    FAKTURA_KORYGUJACA = "faktura_korygujaca"
+    PARAGON = "paragon"
+    RACHUNEK = "rachunek"
+    DEKLARACJA_ZUS = "deklaracja_zus"
+    DECYZJA_ZUS = "decyzja_zus"
+    PIT_11 = "pit_11"
+    UMOWA = "umowa"
+    WYCIAG_BANKOWY = "wyciag_bankowy"
+    POTWIERDZENIE_PRZELEWU = "potwierdzenie_przelewu"
+    INNE = "inne"
+
 
 class DataSource(str, Enum):
-    """Источники происхождения данных."""
+    """Источники извлечения полей согласно схеме."""
     KSEF = "ksef"
-    WHITE_LIST = "white_list"
-    GUS = "gus"
-    CEIDG = "ceidg"
-    KRS = "krs"
     XML = "xml"
     TEXT = "text"
     OCR = "ocr"
@@ -30,168 +45,295 @@ class DataSource(str, Enum):
     HUMAN = "human"
 
 
-class ExtractedField(BaseModel):
-    """Поле с указанием источника и уровня достоверности."""
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+class AgentDecision(str, Enum):
+    """Решение агента по документу."""
+    OK = "ok"
+    ESCALATE = "escalate"
 
-    value: Optional[Union[str, Decimal, date, int, bool]] = None
+
+class PeriodDateBasis(str, Enum):
+    """Основание даты отнесения документа в реестр."""
+    DATA_WYSTAWIENIA = "data_wystawienia"
+    DATA_SPRZEDAZY = "data_sprzedazy"
+    DATA_PLATNOSCI = "data_platnosci"
+    DATA_WIADOMOSCI = "data_wiadomosci"
+
+
+class EmploymentTypeKind(str, Enum):
+    """Коды типов занятости согласно agents/schemas/payroll_facts.json."""
+    UOP = "uop"
+    UZ = "uz"
+    JDG = "jdg"
+    BRAK = "brak"
+
+
+class PayrollSource(str, Enum):
+    """Источник данных о занятости."""
+    PIT_11 = "pit_11"
+    PROFILE = "profile"
+    HUMAN = "human"
+
+
+class ZUSStage(str, Enum):
+    """Стадии льгот ZUS согласно agents/schemas/payroll_facts.json."""
+    ULGA_NA_START = "ulga_na_start"
+    PREFERENCYJNY = "preferencyjny"
+    MALY_ZUS_PLUS = "maly_zus_plus"
+    DUZY_ZUS = "duzy_zus"
+    BRAK = "brak"
+
+
+class TaxRegime(str, Enum):
+    """Налоговые режимы Польши."""
+    SKALA = "skala"
+    LINIOWY = "liniowy"
+    RYCZALT = "ryczalt"
+    CIT_ESTONSKI = "cit_estonski"
+
+
+def mask_iban(iban: Optional[str]) -> Optional[str]:
+    """Маскирование IBAN для соблюдения RODO/DATA_BOUNDARY."""
+    if not iban:
+        return None
+    cleaned = re.sub(r"\s+", "", iban)
+    if len(cleaned) < 8:
+        return "****"
+    return f"{cleaned[:2]}**...{cleaned[-4:]}"
+
+
+# =========================================================================
+# 1. DOCUMENT FACTS (Agent 01 -> agents/schemas/document_facts.json)
+# =========================================================================
+
+class ExtractedField(BaseModel):
+    """Единичное извлеченное поле документа."""
+    model_config = ConfigDict(extra="forbid")
+
+    value: Optional[Union[str, float, int]] = None
     source: DataSource
-    confidence: float = Field(ge=0.0, le=1.0, default=1.0)
+    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class DocumentFacts(BaseModel):
     """
-    Контракт на выходе Agent-01 (Agent Ingestion & Vision).
-    Нормализованные первичные факты любого документа (KSeF XML или скан OCR).
+    Факты документа, извлеченные Agent-01 (OCR/KSeF).
+    Строго валидируется по agents/schemas/document_facts.json.
     """
-    doc_id: Optional[str] = None
-    doc_type: str = Field(description="faktura | paragon | pit11 | wyciag | deklaracja | inne")
-    ksef_reference_number: Optional[str] = None
-    doc_number: Optional[ExtractedField] = None
-    doc_date: Optional[ExtractedField] = None
-    sale_date: Optional[ExtractedField] = None
-    
-    seller_nip: Optional[ExtractedField] = None
-    seller_name: Optional[ExtractedField] = None
-    buyer_nip: Optional[ExtractedField] = None
-    buyer_name: Optional[ExtractedField] = None
-    
-    currency: str = "PLN"
-    netto: Optional[ExtractedField] = None
-    vat: Optional[ExtractedField] = None
-    brutto: Optional[ExtractedField] = None
-    vat_rates_breakdown: Dict[str, Decimal] = Field(default_factory=dict)
-    
-    is_split_payment_mpp: Optional[ExtractedField] = None
-    iban: Optional[ExtractedField] = None
-    
-    decision: str = Field(default="ok", description="'ok' или 'escalate'")
-    escalation_reason: Optional[str] = None
-    raw_sha256: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+
+    doc_type: DocumentType
+    fields: Dict[str, ExtractedField] = Field(default_factory=dict)
+    decision: AgentDecision = AgentDecision.OK
+    why: Optional[str] = Field(default=None, max_length=300)
+
+    # Удобные типизированные свойства-аксессоры для детерминированных калькуляторов
+    def get_field_val(self, key: str) -> Optional[Any]:
+        f = self.fields.get(key)
+        return f.value if f else None
+
+    @property
+    def netto(self) -> Decimal:
+        v = self.get_field_val("netto")
+        return Decimal(str(v)) if v is not None else Decimal('0.00')
+
+    @property
+    def vat(self) -> Decimal:
+        v = self.get_field_val("vat")
+        return Decimal(str(v)) if v is not None else Decimal('0.00')
+
+    @property
+    def brutto(self) -> Decimal:
+        v = self.get_field_val("brutto")
+        return Decimal(str(v)) if v is not None else Decimal('0.00')
+
+    @property
+    def seller_nip(self) -> str:
+        v = self.get_field_val("nip_sprzedawcy")
+        return str(v) if v is not None else ""
+
+    @property
+    def buyer_nip(self) -> str:
+        v = self.get_field_val("nip_nabywcy")
+        return str(v) if v is not None else ""
+
+    @property
+    def seller_name(self) -> str:
+        v = self.get_field_val("nazwa_sprzedawcy")
+        return str(v) if v is not None else ""
+
+    @property
+    def doc_number(self) -> str:
+        v = self.get_field_val("nr_dokumentu")
+        return str(v) if v is not None else ""
+
+    @property
+    def doc_date(self) -> Optional[date]:
+        v = self.get_field_val("data_wystawienia")
+        if isinstance(v, date):
+            return v
+        if isinstance(v, str):
+            try:
+                return date.fromisoformat(v)
+            except ValueError:
+                pass
+        return None
+
+    @property
+    def currency(self) -> str:
+        v = self.get_field_val("waluta")
+        return str(v) if v else "PLN"
 
 
-# ==========================================
-# 2. БУХГАЛТЕРСКАЯ КЛАССИФИКАЦИЯ (Agent-02)
-# ==========================================
+# =========================================================================
+# 2. BOOKING PROPOSAL (Agent 02 -> agents/schemas/booking_proposal.json)
+# =========================================================================
 
 class BookingProposal(BaseModel):
     """
-    Контракт на выходе Agent-02 (Agent Accounting & Classification).
-    Бухгалтерская проводка, колонка KPiR и налоговая классификация.
+    Бухгалтерское предложение проводки от Agent-02 (Księgowy).
+    Строго валидируется по agents/schemas/booking_proposal.json.
     """
+    model_config = ConfigDict(extra="forbid")
+
     category: str
     subcategory: Optional[str] = None
-    kpir_column: Optional[int] = Field(None, description="Столбец KPiR (например: 7 - доход, 10 - товары, 13 - прочие расходы)")
-    ryczalt_rate: Optional[Decimal] = Field(None, description="Ставка Ryczałt (например: 0.12 для 12%)")
-    
-    # Лимиты расходов на автотранспорт
-    vehicle_usage_type: Optional[str] = Field(None, description="'mixed' (75% KUP) | 'business_only' (100% KUP) | 'private' (20% KUP)")
-    kup_deductible_ratio: Decimal = Field(default=Decimal('1.00'), description="Доля расходов, признаваемых налоговыми (KUP)")
-    vat_deductible_ratio: Decimal = Field(default=Decimal('1.00'), description="Доля вычета НДС (1.00 для 100%, 0.50 для 50%)")
-    
-    gtu_codes: List[str] = Field(default_factory=list, description="Коды GTU (GTU_01 .. GTU_13)")
-    procedure_flags: List[str] = Field(default_factory=list, description="Процедуры (MPP, WNT, IMP, etc.)")
-    basis: str = Field(default="rule", description="'rule' | 'precedent' | 'llm' | 'human'")
-    confidence: float = 1.0
+    kpir_column: Optional[int] = Field(default=None, ge=1, le=16)
+    account: Optional[str] = None
+    vat_rate: Optional[float] = None
+    vat_deduction_ratio: Optional[float] = None # 0, 0.5, 1, None
+    pit_cost_ratio: Optional[float] = None      # 0, 0.75, 1, None
+    period_date: Optional[str] = None           # ISO-8601 YYYY-MM-DD
+    period_date_basis: Optional[PeriodDateBasis] = None
+    confidence: float = Field(ge=0.0, le=1.0)
+    basis: str                                  # precedent:<id> | rule:<id> | llm
+    decision: AgentDecision = AgentDecision.OK
+    why: Optional[str] = Field(default=None, max_length=300)
+
+    @field_validator("vat_deduction_ratio")
+    @classmethod
+    def validate_vat_ratio(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and v not in (0.0, 0.5, 1.0):
+            raise ValueError("vat_deduction_ratio must be 0, 0.5, 1 or None")
+        return v
+
+    @field_validator("pit_cost_ratio")
+    @classmethod
+    def validate_pit_ratio(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and v not in (0.0, 0.75, 1.0):
+            raise ValueError("pit_cost_ratio must be 0, 0.75, 1 or None")
+        return v
 
 
-# ==========================================
-# 3. ПРОФИЛЬ НАЛОГОПЛАТЕЛЬЩИКА И СТАТУСЫ
-# ==========================================
+# =========================================================================
+# 3. PAYROLL FACTS (Agent 03 -> agents/schemas/payroll_facts.json)
+# =========================================================================
 
-class EmploymentType(str, Enum):
-    """Типы трудовых и коммерческих отношений."""
-    UOP = "Umowa o pracę"
-    UZ = "Umowa zlecenie"
-    UOD = "Umowa o dzieło"
-    JDG = "JDG"
-    ZARZAD = "Powołanie do Zarządu"
+class PayrollPeriodItem(BaseModel):
+    """Период занятости согласно agents/schemas/payroll_facts.json."""
+    model_config = ConfigDict(extra="forbid")
 
+    from_date: str = Field(alias="from")
+    to_date: str = Field(alias="to")
+    kind: EmploymentTypeKind
+    payer_nip: Optional[str] = None
+    gross: Optional[float] = None
+    kup: Optional[float] = None
+    advance_withheld: Optional[float] = None
+    source: PayrollSource
+
+
+class PayrollFacts(BaseModel):
+    """
+    Кадровые факты года от Agent-03 (Kadrowy).
+    Строго валидируется по agents/schemas/payroll_facts.json.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    periods: List[PayrollPeriodItem] = Field(default_factory=list)
+    zus_stage_by_month: Dict[str, ZUSStage] = Field(default_factory=dict)
+    zbieg_tytulow: Optional[bool] = None
+    decision: AgentDecision = AgentDecision.OK
+    why: Optional[str] = Field(default=None, max_length=300)
+
+
+# =========================================================================
+# 4. ADVISORY REPORT (Agent 04 -> agents/schemas/advisory_report.json)
+# =========================================================================
+
+class AdvisoryScenarioItem(BaseModel):
+    """Сценарий в отчете советника согласно agents/schemas/advisory_report.json."""
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    figures: Dict[str, float]
+    effective_burden_pct: Optional[float] = None
+    tradeoff: str
+
+
+class AdvisoryReport(BaseModel):
+    """
+    Отчет Agent-Doradca (Agent 04).
+    Строго валидируется по agents/schemas/advisory_report.json.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    scenarios: List[AdvisoryScenarioItem] = Field(min_length=2)
+    assumptions: List[str] = Field(min_length=1)
+    unknowns: List[str] = Field(default_factory=list)
+    note: str = Field(default="", max_length=900)
+    disclaimer: str = Field(
+        default="To jest kalkulacja, a nie doradztwo podatkowe. Wszelkie decyzje podejmuje przedsiębiorca."
+    )
+
+
+# =========================================================================
+# 5. TAX OBLIGATIONS & PROFILE (Вспомогательные структуры)
+# =========================================================================
 
 class EmploymentPeriod(BaseModel):
-    """Период трудовой деятельности / бизнеса."""
-    emp_type: EmploymentType
+    """Структура периода занятости в профиле налогоплательщика."""
+    emp_type: EmploymentTypeKind
     start_date: date
     end_date: Optional[date] = None
-    monthly_gross_avg: Decimal = Field(default=Decimal('0.00'))
-    is_student_under_26: bool = False
+    monthly_gross_avg: Decimal = Decimal('0.00')
     payer_nip: Optional[str] = None
-    notes: Optional[str] = None
-
-
-class TaxRegime(str, Enum):
-    """Режимы налогообложения в Польше."""
-    SKALA = "skala"              # 12% / 32% + kwota wolna 30 000 zł
-    LINIOWY = "liniowy"          # 19%
-    RYCZALT = "ryczalt"          # 2% - 17% от выручки
-    CIT_ESTONSKI = "cit_estonski"# 0% до вывода дивидендов (Sp. z o.o.)
-    CIT_KLASYCZNY = "cit_klasyczny" # 9% / 19%
 
 
 class TaxpayerProfile(BaseModel):
-    """Профиль налогоплательщика с историей изменения статусов."""
+    """Профиль налогоплательщика (JDG / физлицо)."""
     pesel_masked: str
     nip: str
-    full_name_masked: str = "Jan K*****"
+    full_name_masked: str = "Jan Kowalski"
     date_of_birth: date
+    is_student_under_26: bool = False
+    is_vat_payer: bool = True
+    jdg_tax_regime: Optional[TaxRegime] = TaxRegime.SKALA
+    jdg_ryczalt_rate: Decimal = Decimal('0.12')
     employment_history: List[EmploymentPeriod] = Field(default_factory=list)
-    jdg_tax_regime: Optional[TaxRegime] = None
-    is_vat_payer: bool = False
-    mikrorachunek: Optional[str] = None
-    zus_nrs_account: Optional[str] = None
-
-
-# ==========================================
-# 4. СТАТИСТИКА И ОБЯЗАТЕЛЬСТВА ZUS (Agent-03)
-# ==========================================
-
-class ZUSStage(str, Enum):
-    """Стадии льгот по социальному страхованию для JDG."""
-    ULGA_NA_START = "ulga_na_start"      # Первые 6 полных месяцев (только Zdrowotna, 0 соцвзносов)
-    PREFERENCYJNY = "preferencyjny"      # Следующие 24 месяца (база 30% от минимальной зарплаты)
-    MALY_ZUS_PLUS = "maly_zus_plus"      # До 36 месяцев в течение 60 (база от дохода прошлого года)
-    DUZY_ZUS = "duzy_zus"                # Стандартный полный ZUS (база 60% от средней зарплаты)
 
 
 class ZUSObligations(BaseModel):
-    """Детализированный расчет обязательств ZUS за конкретный месяц."""
-    month: str                           # Формат: 'YYYY-MM'
+    """Месячный расчет страховых взносов ZUS."""
     stage: ZUSStage
-    zbieg_tytulow: bool = False
-    
-    # Базы начисления
+    month: str # YYYY-MM
     spoleczne_base: Decimal = Decimal('0.00')
     zdrowotna_base: Decimal = Decimal('0.00')
-    
-    # Взносы социального страхования (Ubezpieczenia Społeczne)
-    emerytalne: Decimal = Decimal('0.00')   # 19.52%
-    rentowe: Decimal = Decimal('0.00')      # 8.00%
-    chorobowe: Decimal = Decimal('0.00')    # 2.45% (добровольное для JDG)
-    wypadkowe: Decimal = Decimal('0.00')    # 1.67% (стандарт)
-    
-    # Фонд труда и солидарности
-    fundusz_pracy: Decimal = Decimal('0.00')# 2.45% (не платится на Ulga na start и Preferencyjny)
-    
-    # Медицинское страхование (Ubezpieczenie Zdrowotne)
+    emerytalne: Decimal = Decimal('0.00')
+    rentowe: Decimal = Decimal('0.00')
+    chorobowe: Decimal = Decimal('0.00')
+    wypadkowe: Decimal = Decimal('0.00')
+    fundusz_pracy: Decimal = Decimal('0.00')
     skladka_zdrowotna: Decimal = Decimal('0.00')
-    
-    # Итоговые суммы
     total_spoleczne: Decimal = Decimal('0.00')
     total_zus_do_zaplaty: Decimal = Decimal('0.00')
-    
-    forms_required: List[str] = Field(default_factory=list, description="['ZUS DRA', 'ZUS RCA', 'ZUS ZZA']")
+    forms_required: List[str] = Field(default_factory=list)
+    zbieg_tytulow: bool = False
 
-
-# ==========================================
-# 5. СОСТОЯНИЕ СИНХРОНИЗАЦИИ (Шаг +0)
-# ==========================================
 
 class SyncState(BaseModel):
-    """Вектор состояния и водяные знаки для дифференциальной синхронизации."""
+    """Водяные знаки состояния (Шаг +0)."""
     nip: str
-    ksef_last_sync_timestamp: Optional[datetime] = None
-    ksef_last_reference_number: Optional[str] = None
-    bank_last_booking_date: Optional[date] = None
-    bank_last_tx_id: Optional[str] = None
     telegram_last_message_id: Optional[int] = None
+    ksef_last_sync_timestamp: Optional[str] = None
+    bank_last_sync_timestamp: Optional[str] = None
     synced_sha256_hashes: List[str] = Field(default_factory=list)

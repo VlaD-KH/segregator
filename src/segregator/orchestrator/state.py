@@ -9,15 +9,15 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-from src.segregator.domain.models import (
+from segregator.domain.models import (
     BookingProposal,
     DocumentFacts,
     SyncState,
     TaxpayerProfile,
     ZUSObligations,
 )
-from src.segregator.accounting.kpir import KPiREntry
-from src.segregator.tax.pit import MonthlyTaxResult, PayrollResult
+from segregator.accounting.kpir import KPiREntry
+from segregator.tax.pit import MonthlyTaxResult, PayrollResult
 
 
 class AuditEntry(BaseModel):

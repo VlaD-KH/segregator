@@ -7,19 +7,21 @@ from datetime import date
 from decimal import Decimal
 import pytest
 
-from src.segregator.domain.models import (
+from segregator.domain.models import (
     DataSource,
+    DocumentType,
+    AgentDecision,
     DocumentFacts,
     ExtractedField,
     BookingProposal,
     TaxpayerProfile,
     EmploymentPeriod,
-    EmploymentType,
+    EmploymentTypeKind,
     TaxRegime,
     SyncState,
 )
-from src.segregator.orchestrator.state import AccountingGraphState
-from src.segregator.orchestrator.graph import build_accounting_graph
+from segregator.orchestrator.state import AccountingGraphState
+from segregator.orchestrator.graph import build_accounting_graph
 
 
 @pytest.fixture
@@ -32,7 +34,7 @@ def sample_taxpayer_profile():
         jdg_tax_regime=TaxRegime.SKALA,
         employment_history=[
             EmploymentPeriod(
-                emp_type=EmploymentType.JDG,
+                emp_type=EmploymentTypeKind.JDG,
                 start_date=date(2025, 10, 1)
             )
         ]
@@ -60,13 +62,13 @@ def test_graph_happy_path(sample_taxpayer_profile):
     
     # 2. Проверка фактов Agent-01
     assert final_state.facts is not None
-    assert final_state.facts.seller_nip.value == "5252344078"
-    assert final_state.facts.netto.value == Decimal('1000.00')
+    assert final_state.facts.seller_nip == "5252344078"
+    assert final_state.facts.netto == Decimal('1000.00')
     
     # 3. Проверка классификации Agent-02 (Orlen -> Mixed car -> 75% KUP)
     assert final_state.proposal is not None
     assert final_state.proposal.kpir_column == 13
-    assert final_state.proposal.kup_deductible_ratio == Decimal('0.75')
+    assert final_state.proposal.pit_cost_ratio == 0.75
     assert final_state.kpir_entry is not None
     assert final_state.kpir_entry.col_13_pozostale_wydatki == Decimal('836.25')
     
@@ -116,12 +118,14 @@ def test_graph_human_in_the_loop_on_math_discrepancy(sample_taxpayer_profile):
     
     # Фактура с математической ошибкой: Netto 1000 + VAT 230 != Brutto 1500
     invalid_facts = DocumentFacts(
-        doc_type="faktura",
-        seller_nip=ExtractedField(value="5252344078", source=DataSource.OCR, confidence=0.90),
-        netto=ExtractedField(value=Decimal('1000.00'), source=DataSource.OCR),
-        vat=ExtractedField(value=Decimal('230.00'), source=DataSource.OCR),
-        brutto=ExtractedField(value=Decimal('1500.00'), source=DataSource.OCR), # Ошибка!
-        decision="ok"
+        doc_type=DocumentType.FAKTURA_KOSZTOWA,
+        fields={
+            "nip_sprzedawcy": ExtractedField(value="5252344078", source=DataSource.OCR, confidence=0.90),
+            "netto": ExtractedField(value=1000.0, source=DataSource.OCR, confidence=0.90),
+            "vat": ExtractedField(value=230.0, source=DataSource.OCR, confidence=0.90),
+            "brutto": ExtractedField(value=1500.0, source=DataSource.OCR, confidence=0.90), # Ошибка!
+        },
+        decision=AgentDecision.OK
     )
     
     initial_state = AccountingGraphState(

@@ -10,7 +10,7 @@ from enum import Enum
 from typing import List, Optional
 from pydantic import BaseModel, Field
 
-from src.segregator.domain.models import DocumentFacts, BookingProposal
+from segregator.domain.models import DocumentFacts, BookingProposal, DocumentType
 
 
 class KPiRColumn(int, Enum):
@@ -71,13 +71,13 @@ class KPiREngine:
         Преобразует DocumentFacts и BookingProposal в готовую строку KPiR.
         Учитывает статус плательщика VAT и лимиты расходов на авто (75% KUP).
         """
-        raw_netto = Decimal(str(facts.netto.value)) if facts.netto and facts.netto.value is not None else Decimal('0.00')
-        raw_vat = Decimal(str(facts.vat.value)) if facts.vat and facts.vat.value is not None else Decimal('0.00')
-        raw_brutto = Decimal(str(facts.brutto.value)) if facts.brutto and facts.brutto.value is not None else (raw_netto + raw_vat)
+        raw_netto = facts.netto
+        raw_vat = facts.vat
+        raw_brutto = facts.brutto if facts.brutto > Decimal('0.00') else (raw_netto + raw_vat)
         
-        doc_date = facts.doc_date.value if (facts.doc_date and isinstance(facts.doc_date.value, date)) else date.today()
-        doc_nr = str(facts.doc_number.value) if (facts.doc_number and facts.doc_number.value) else "DOW_01"
-        seller_name = str(facts.seller_name.value) if (facts.seller_name and facts.seller_name.value) else "Kontrahent"
+        doc_date = facts.doc_date or date.today()
+        doc_nr = facts.doc_number or "DOW_01"
+        seller_name = facts.seller_name or "Kontrahent"
         
         entry = KPiREntry(
             lp=lp,
@@ -88,8 +88,7 @@ class KPiREngine:
         )
 
         # 1. ДОХОДЫ (Przychody)
-        if proposal.kpir_column == 7 or facts.doc_type == "faktura_sprzedazy":
-            # Если плательщик VAT -> доход равен Netto, если неплательщик -> доход равен Brutto
+        if proposal.kpir_column == 7 or facts.doc_type == DocumentType.FAKTURA_SPRZEDAZY:
             revenue = raw_netto if is_company_vat_payer else raw_brutto
             entry.col_7_przychody = revenue
             entry.col_9_razem_przychody = revenue
@@ -103,26 +102,23 @@ class KPiREngine:
             return entry
 
         # 2. РАСХОДЫ (Wydatki)
-        # Расчет признаваемой суммы расхода (KUP) с учетом лимита на авто (75% / 100% / 20%)
-        # Для легкового авто со смешанным использованием:
-        # Невычитаемый VAT = 50% * VAT
-        # База расхода = Netto + 50% * VAT
-        # В KUP идет = 75% * (Netto + 50% * VAT)
-        if proposal.vehicle_usage_type == "mixed":
-            # 50% вычет НДС
+        # Лимит авто: pit_cost_ratio == 0.75 и vat_deduction_ratio == 0.50
+        pit_ratio = Decimal(str(proposal.pit_cost_ratio)) if proposal.pit_cost_ratio is not None else Decimal('1.00')
+        vat_ratio = Decimal(str(proposal.vat_deduction_ratio)) if proposal.vat_deduction_ratio is not None else Decimal('1.00')
+
+        if proposal.pit_cost_ratio == 0.75 and proposal.vat_deduction_ratio == 0.50:
+            # 50% невычитаемый VAT входит в базу затрат KUP
             non_deductible_vat = (raw_vat * Decimal('0.50')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             expense_base = raw_netto + non_deductible_vat
             tax_deductible_expense = (expense_base * Decimal('0.75')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             entry.vat_amount = (raw_vat * Decimal('0.50')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             entry.notes = "Samochód osobowy: 75% KUP, 50% VAT"
         elif not is_company_vat_payer:
-            # Неплательщик VAT включает весь брутто в KUP
-            tax_deductible_expense = (raw_brutto * proposal.kup_deductible_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            tax_deductible_expense = (raw_brutto * pit_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             entry.vat_amount = Decimal('0.00')
         else:
-            # Стандартный расход (100% KUP, 100% VAT)
-            tax_deductible_expense = (raw_netto * proposal.kup_deductible_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-            entry.vat_amount = raw_vat
+            tax_deductible_expense = (raw_netto * pit_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            entry.vat_amount = (raw_vat * vat_ratio).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         # Разнесение по колонкам затрат
         if proposal.kpir_column == 10:

@@ -1,22 +1,22 @@
 """
-src/segregator/compliance package exports.
+segregator.compliance package exports.
 """
 
-from src.segregator.compliance.pit36 import (
+from segregator.compliance.pit36 import (
     IncomeSourceRecord,
     PITBAttachment,
     PIT36Declaration,
     PIT36Consolidator,
 )
-from src.segregator.compliance.jpk_v7 import (
+from segregator.compliance.jpk_v7 import (
     JPKSalesRecord,
     JPKPurchaseRecord,
     JPKV7MGenerator,
 )
-from src.segregator.compliance.zus_kedu import (
+from segregator.compliance.zus_kedu import (
     ZUSKEDUGenerator,
 )
-from src.segregator.compliance.xml_validator import (
+from segregator.compliance.xml_validator import (
     ValidationResult,
     ComplianceXMLValidator,
 )
