@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import sys
@@ -55,6 +56,17 @@ def _load_settings_or_exit() -> Settings:
     except ValidationError as error:
         typer.echo(format_validation_error(error))
         raise typer.Exit(code=1)
+
+
+def _resolve_workspace_root(settings: Settings) -> Path:
+    """Корень рабочего пространства: БД, blobs/, archiwum/, rejestry/, logs/.
+
+    Единственная точка, где ARCHIVE_DIR можно перенаправить. `SEGREGATOR_ARCHIVE_DIR`
+    двигает корень целиком — иначе прогон, считающий себя изолированным, всё равно
+    писал бы БД и логи в боевой архив (контур: docs/DATA_BOUNDARY.md, инвариант 4).
+    """
+    override = os.environ.get("SEGREGATOR_ARCHIVE_DIR")
+    return Path(override) if override else settings.archive_dir
 
 
 @app.command()
@@ -180,14 +192,15 @@ def demo_run() -> None:
     - Консолидация годового отчета PIT-36 за 2025 год
     """
     settings = _load_settings_or_exit()
-    slog.configure_logging(settings.archive_dir / "logs")
+    workspace = _resolve_workspace_root(settings)
+    slog.configure_logging(workspace / "logs")
     log = slog.get_logger("cli.demo_run")
 
     typer.secho("\n=======================================================", fg=typer.colors.CYAN, bold=True)
     typer.secho("   SEGREGATOR — ДЕМОНСТРАЦИОННЫЙ ПРОГОН СИСТЕМЫ       ", fg=typer.colors.WHITE, bg=typer.colors.BLUE, bold=True)
     typer.secho("=======================================================\n", fg=typer.colors.CYAN, bold=True)
 
-    service = SegregatorService(workspace_root=settings.archive_dir)
+    service = SegregatorService(workspace_root=workspace)
 
     profile = TaxpayerProfile(
         pesel_masked="900101*****",
@@ -206,7 +219,10 @@ def demo_run() -> None:
         ]
     )
 
-    demo_tmp_dir = settings.archive_dir / "demo_temp"
+    # Синтетические демо-фактуры кладём в перенаправляемый корень, а не в
+    # settings.archive_dir: иначе они оседают там, куда указывает ARCHIVE_DIR
+    # (однажды это была папка Google Drive, и заглушки уехали в git).
+    demo_tmp_dir = workspace / "demo_temp"
     demo_tmp_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Документ 1: Фактура продаж (B2B IT Consulting)
@@ -343,7 +359,7 @@ def process(
         raise typer.Exit(code=1)
 
     settings = _load_settings_or_exit()
-    service = SegregatorService(workspace_root=settings.archive_dir)
+    service = SegregatorService(workspace_root=_resolve_workspace_root(settings))
 
     profile = TaxpayerProfile(
         pesel_masked="900101*****",
@@ -372,6 +388,6 @@ def report(
         raise typer.Exit(code=1)
 
     settings = _load_settings_or_exit()
-    service = SegregatorService(workspace_root=settings.archive_dir)
+    service = SegregatorService(workspace_root=_resolve_workspace_root(settings))
     out_path = service.generate_monthly_register(y, m)
     typer.secho(f"Реестр успешно сгенерирован: {out_path}", fg=typer.colors.GREEN, bold=True)

@@ -78,10 +78,35 @@ def test_service_process_document_and_route(service_test_env):
 
 
 def test_cli_demo_run(tmp_path, monkeypatch):
-    """Тест demo-run с гарантированной изоляцией в tmp_path."""
-    monkeypatch.setenv("SEGREGATOR_ARCHIVE_DIR", str(tmp_path))
-    runner = CliRunner()
-    result = runner.invoke(app, ["demo-run"])
-    assert result.exit_code == 0
+    """demo-run отрабатывает и целиком остаётся внутри перенаправленного корня.
+
+    ARCHIVE_DIR и SEGREGATOR_ARCHIVE_DIR намеренно разведены: первый — то, что
+    настройки считают боевым архивом, второй — куда прогон обязан уехать целиком.
+    Пока переключатель двигал только archive_dir, БД, blobs/, rejestry/ и логи
+    оставались в боевом каталоге — этот тест на такой код красный.
+    """
+    monkeypatch.chdir(tmp_path)  # чтобы не подхватить .env/config.toml из репозитория
+
+    export = tmp_path / "export"
+    export.mkdir()
+    boevoy = tmp_path / "boevoy_archive"  # ARCHIVE_DIR из настроек
+    boevoy.mkdir()
+    workspace = tmp_path / "workspace"  # куда всё должно уехать
+
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("OWNER_USER_ID", "1")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    monkeypatch.setenv("EXPORT_DIR", str(export))
+    monkeypatch.setenv("ARCHIVE_DIR", str(boevoy))
+    monkeypatch.setenv("SEGREGATOR_ARCHIVE_DIR", str(workspace))
+
+    result = CliRunner().invoke(app, ["demo-run"])
+
+    assert result.exit_code == 0, result.output
     assert "SEGREGATOR — ДЕМОНСТРАЦИОННЫЙ ПРОГОН" in result.output
     assert "ДЕМОНСТРАЦИОННЫЙ ПРОГОН УСПЕШНО ЗАВЕРШЕН" in result.output
+
+    # Артефакты — в перенаправленном корне…
+    assert (workspace / "segregator.db").exists()
+    # …и ни одного байта в том, что настройки считают боевым архивом.
+    assert list(boevoy.iterdir()) == [], f"утечка в боевой архив: {list(boevoy.iterdir())}"

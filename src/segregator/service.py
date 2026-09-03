@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 import sqlite3
 from datetime import date, datetime, timezone
@@ -63,12 +62,14 @@ class SegregatorService:
     """
 
     def __init__(self, workspace_root: Path, db_path: Optional[Path] = None):
+        # Все пути выводятся из одного workspace_root. Раньше здесь был отдельный
+        # SEGREGATOR_ARCHIVE_DIR, который переносил только archive_dir, а БД, blobs/
+        # и rejestry/ оставлял на месте: тест «изолирован в tmp_path» при этом писал
+        # в боевой архив. Переключатель поднят на уровень CLI, где выбирается корень.
         self.root = workspace_root
         self.db_path = db_path or (workspace_root / "segregator.db")
         self.blobs_dir = workspace_root / "blobs"
-        
-        custom_archive = os.environ.get("SEGREGATOR_ARCHIVE_DIR")
-        self.archive_dir = Path(custom_archive) if custom_archive else (workspace_root / "archiwum" / "wg-daty-dokumentu")
+        self.archive_dir = workspace_root / "archiwum" / "wg-daty-dokumentu"
         self.registers_dir = workspace_root / "rejestry"
         self.graph = build_accounting_graph()
         
