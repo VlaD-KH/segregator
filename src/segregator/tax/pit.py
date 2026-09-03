@@ -25,7 +25,24 @@ class PITConstants:
     
     # Podatek liniowy
     STAWKA_LINIOWY = Decimal('0.19')            # 19%
-    LINIOWY_ZDROWOTNA_MAX_2025 = Decimal('12900.00') # Лимит вычета zdrowotna в 2025
+    # Лимит вычета składki zdrowotnej — величина годовая (obwieszczenie MF).
+    # Год в имени константы годом не выбирался: лимит 2025 применялся ко всем
+    # годам, включая 2026, где он на 1200 zł выше.
+    LINIOWY_ZDROWOTNA_MAX: Dict[int, Decimal] = {
+        2024: Decimal('11600.00'),
+        2025: Decimal('12900.00'),
+        2026: Decimal('14100.00'),
+    }
+    # Совместимость: прежнее имя оставлено как значение 2025 года.
+    LINIOWY_ZDROWOTNA_MAX_2025 = Decimal('12900.00')
+
+    @classmethod
+    def get_liniowy_zdrowotna_max(cls, year: int) -> Decimal:
+        if year not in cls.LINIOWY_ZDROWOTNA_MAX:
+            raise ValueError(
+                f"Brak limitu odliczenia składki zdrowotnej dla roku {year}. Odmowa kalkulacji."
+            )
+        return cls.LINIOWY_ZDROWOTNA_MAX[year]
     
     # UoP (Koszty uzyskania przychodu)
     KUP_UOP_BASIC_MONTHLY = Decimal('250.00')   # 250 zł/мес стандартные затраты
