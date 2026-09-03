@@ -78,27 +78,28 @@ def test_service_process_document_and_route(service_test_env):
 
 
 def test_cli_demo_run(tmp_path, monkeypatch):
-    """demo-run отрабатывает и целиком остаётся внутри перенаправленного корня.
+    """demo-run отрабатывает и не выходит за пределы ARCHIVE_DIR.
 
-    ARCHIVE_DIR и SEGREGATOR_ARCHIVE_DIR намеренно разведены: первый — то, что
-    настройки считают боевым архивом, второй — куда прогон обязан уехать целиком.
-    Пока переключатель двигал только archive_dir, БД, blobs/, rejestry/ и логи
-    оставались в боевом каталоге — этот тест на такой код красный.
+    Механизм конфига один — ARCHIVE_DIR, тот же, которым пользуется
+    conftest.isolated_project. Отдельный SEGREGATOR_ARCHIVE_DIR убран: он двигал
+    только часть путей, оставляя БД, blobs/, rejestry/ и логи в боевом каталоге.
+
+    Синтетические входные «фактуры» демо-прогона идут во временный каталог ОС и
+    в архив не попадают вовсе — раньше они писались в ARCHIVE_DIR, откуда
+    заглушки FV_2025_11_*.pdf однажды уехали в git через папку Google Drive.
     """
     monkeypatch.chdir(tmp_path)  # чтобы не подхватить .env/config.toml из репозитория
 
     export = tmp_path / "export"
     export.mkdir()
-    boevoy = tmp_path / "boevoy_archive"  # ARCHIVE_DIR из настроек
-    boevoy.mkdir()
-    workspace = tmp_path / "workspace"  # куда всё должно уехать
+    archive = tmp_path / "archive"
+    archive.mkdir()
 
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setenv("OWNER_USER_ID", "1")
     monkeypatch.setenv("LLM_MODEL", "test-model")
     monkeypatch.setenv("EXPORT_DIR", str(export))
-    monkeypatch.setenv("ARCHIVE_DIR", str(boevoy))
-    monkeypatch.setenv("SEGREGATOR_ARCHIVE_DIR", str(workspace))
+    monkeypatch.setenv("ARCHIVE_DIR", str(archive))
 
     result = CliRunner().invoke(app, ["demo-run"])
 
@@ -106,7 +107,7 @@ def test_cli_demo_run(tmp_path, monkeypatch):
     assert "SEGREGATOR — ДЕМОНСТРАЦИОННЫЙ ПРОГОН" in result.output
     assert "ДЕМОНСТРАЦИОННЫЙ ПРОГОН УСПЕШНО ЗАВЕРШЕН" in result.output
 
-    # Артефакты — в перенаправленном корне…
-    assert (workspace / "segregator.db").exists()
-    # …и ни одного байта в том, что настройки считают боевым архивом.
-    assert list(boevoy.iterdir()) == [], f"утечка в боевой архив: {list(boevoy.iterdir())}"
+    # Всё легло под ARCHIVE_DIR…
+    assert (archive / "segregator.db").exists()
+    # …и демо-заглушки в архив не попали.
+    assert not (archive / "demo_temp").exists(), "синтетические фактуры осели в архиве"
