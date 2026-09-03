@@ -127,8 +127,8 @@ def test_calculate_monthly_obligations_ulga_na_start():
     Тест расчета взносов на стадии Ulga na start:
     - Социальные взносы = 0 PLN
     - Fundusz Pracy = 0 PLN
-    - Składka Zdrowotna = 9% от дохода (но не менее 9% от минимальной ЗП)
-    - Формы: ZUS DRA + ZUS ZZA
+    - Składka Zdrowotna = 9% от базы (база не ниже минимальной ЗП)
+    - Формы: только ZUS DRA — ноябрь не месяц смены титула страхования
     """
     profile = TaxpayerProfile(
         pesel_masked="900101*****",
@@ -156,7 +156,9 @@ def test_calculate_monthly_obligations_ulga_na_start():
     # Zdrowotna: 10 000 * 9% = 900.00 PLN
     assert obligations.skladka_zdrowotna == Decimal('900.00')
     assert obligations.total_zus_do_zaplaty == Decimal('900.00')
-    assert "ZUS ZZA" in obligations.forms_required
+    # Ноябрь — не месяц смены титула (октябрь тоже Ulga na start), поэтому
+    # регистрационных форм нет: только месячная декларация.
+    assert obligations.forms_required == ["ZUS DRA"]
 
 
 def test_calculate_monthly_obligations_preferencyjny():
@@ -198,7 +200,8 @@ def test_calculate_monthly_obligations_preferencyjny():
     assert obligations.wypadkowe == Decimal('23.38')
     assert obligations.fundusz_pracy == Decimal('0.00')
     assert obligations.total_spoleczne == Decimal('442.90')
-    assert "ZUS ZUA" in obligations.forms_required
+    # Май 2025 — не месяц перехода (апрель тоже Preferencyjny): только DRA.
+    assert obligations.forms_required == ["ZUS DRA"]
 
 
 def test_calculate_monthly_obligations_zbieg_tytulow():
@@ -236,4 +239,150 @@ def test_calculate_monthly_obligations_zbieg_tytulow():
     # Zdrowotna: 5000 * 9% = 450.00 (но минимальная 4666 * 9% = 419.94) -> 450.00
     assert obligations.skladka_zdrowotna == Decimal('450.00')
     assert obligations.total_zus_do_zaplaty == Decimal('450.00')
-    assert "ZUS ZZA" in obligations.forms_required
+    assert obligations.forms_required == ["ZUS DRA"]
+
+
+# ---------------------------------------------------------------------------
+# Формы отчётности: DRA ежемесячно, регистрационные — только в месяц смены титула
+# ---------------------------------------------------------------------------
+
+def _jdg_profile(start: date, regime: TaxRegime = TaxRegime.SKALA) -> TaxpayerProfile:
+    return TaxpayerProfile(
+        pesel_masked="900101*****",
+        nip="5252344078",
+        date_of_birth=date(1990, 1, 1),
+        jdg_tax_regime=regime,
+        employment_history=[
+            EmploymentPeriod(emp_type=EmploymentTypeKind.JDG, start_date=start)
+        ],
+    )
+
+
+def test_registration_forms_only_in_month_of_stage_change():
+    """ZWUA+ZUA подаются в месяц перехода Ulga na start -> Preferencyjny, и только в него.
+
+    ZUA — регистрационная форма (постановка на полное страхование), а не месячный
+    отчёт. Пока она приклеивалась к каждому месяцу, выдача предлагала подавать её
+    ежемесячно.
+    """
+    profile = _jdg_profile(date(2025, 1, 1))
+
+    # Июнь: 5-й месяц -> ещё Ulga na start, титул не менялся.
+    june = ZUSCalculator.calculate_monthly_obligations(
+        profile=profile, target_month=date(2025, 6, 1), jdg_monthly_profit=Decimal('10000.00')
+    )
+    assert june.stage == ZUSStage.ULGA_NA_START
+    assert june.forms_required == ["ZUS DRA"]
+
+    # Июль: 6-й месяц -> переход на Preferencyjny. Снятие старого титула + постановка.
+    july = ZUSCalculator.calculate_monthly_obligations(
+        profile=profile, target_month=date(2025, 7, 1), jdg_monthly_profit=Decimal('10000.00')
+    )
+    assert july.stage == ZUSStage.PREFERENCYJNY
+    assert july.forms_required == ["ZUS DRA", "ZUS ZWUA", "ZUS ZUA"]
+
+    # Август: ступень та же -> снова только месячная декларация.
+    august = ZUSCalculator.calculate_monthly_obligations(
+        profile=profile, target_month=date(2025, 8, 1), jdg_monthly_profit=Decimal('10000.00')
+    )
+    assert august.forms_required == ["ZUS DRA"]
+
+
+def test_first_month_registers_without_zwua():
+    """В месяц открытия JDG снимать нечего — ZWUA не подаётся."""
+    obligations = ZUSCalculator.calculate_monthly_obligations(
+        profile=_jdg_profile(date(2025, 10, 1)),
+        target_month=date(2025, 10, 1),
+        jdg_monthly_profit=Decimal('12000.00'),
+    )
+    assert obligations.forms_required == ["ZUS DRA", "ZUS ZZA"]
+
+
+def test_no_obligations_before_jdg_start():
+    """Месяц до открытия JDG: обязательств нет, включая składkę zdrowotną.
+
+    Раньше ветвление по ступеням не совпадало с BRAK, расчёт проваливался дальше
+    и начислял медицинский взнос за месяц без деятельности.
+    """
+    obligations = ZUSCalculator.calculate_monthly_obligations(
+        profile=_jdg_profile(date(2025, 10, 1)),
+        target_month=date(2025, 9, 1),
+        jdg_monthly_profit=Decimal('12000.00'),
+    )
+    assert obligations.stage == ZUSStage.BRAK
+    assert obligations.skladka_zdrowotna == Decimal('0.00')
+    assert obligations.total_spoleczne == Decimal('0.00')
+    assert obligations.total_zus_do_zaplaty == Decimal('0.00')
+    assert obligations.forms_required == []
+
+
+# ---------------------------------------------------------------------------
+# Składka zdrowotna: пол применяется к базе, а не к готовому взносу
+# ---------------------------------------------------------------------------
+
+def test_zdrowotna_liniowy_floors_base_not_contribution():
+    """Для liniowego минимум — это минималка как БАЗА, дальше своя ставка 4.9%.
+
+    Прежний пол `min_wage * 9%` применялся ко всем режимам: liniowy получал
+    419.94 вместо 228.63 за 2025 — почти вдвое больше должного.
+    """
+    obligations = ZUSCalculator.calculate_monthly_obligations(
+        profile=_jdg_profile(date(2020, 1, 1), regime=TaxRegime.LINIOWY),
+        target_month=date(2025, 5, 1),
+        jdg_monthly_profit=Decimal('3000.00'),  # ниже минималки 4666.00
+    )
+    assert obligations.zdrowotna_base == Decimal('4666.00')
+    assert obligations.skladka_zdrowotna == Decimal('228.63')  # 4666.00 * 4.9%
+
+
+def test_zdrowotna_skala_above_floor_uses_profit():
+    """Выше пола база — реальная прибыль (для skali пол и ставка совпадают в 9%)."""
+    obligations = ZUSCalculator.calculate_monthly_obligations(
+        profile=_jdg_profile(date(2020, 1, 1), regime=TaxRegime.SKALA),
+        target_month=date(2025, 5, 1),
+        jdg_monthly_profit=Decimal('10000.00'),
+    )
+    assert obligations.zdrowotna_base == Decimal('10000.00')
+    assert obligations.skladka_zdrowotna == Decimal('900.00')
+
+
+# ---------------------------------------------------------------------------
+# Ryczałt: три ступени базы по годовому przychodowi
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "annual_revenue, expected_base, expected_zdrowotna",
+    [
+        (Decimal('50000.00'), Decimal('5129.51'), Decimal('461.66')),    # <= 60k  -> 60%
+        (Decimal('200000.00'), Decimal('8549.18'), Decimal('769.43')),   # <= 300k -> 100%
+        (Decimal('400000.00'), Decimal('15388.52'), Decimal('1384.97')), # > 300k  -> 180%
+    ],
+)
+def test_ryczalt_zdrowotna_three_tiers(annual_revenue, expected_base, expected_zdrowotna):
+    """База ryczałtu — 60/100/180% od przeciętnego w sektorze przedsiębiorstw IV кв.
+
+    Показатель отличается от prognozowanego przeciętnego wynagrodzenia, на котором
+    строится база dużego ZUS: за 2025 это 8549.18, а не 8673.00.
+    """
+    obligations = ZUSCalculator.calculate_monthly_obligations(
+        profile=_jdg_profile(date(2020, 1, 1), regime=TaxRegime.RYCZALT),
+        target_month=date(2025, 5, 1),
+        annual_revenue=annual_revenue,
+    )
+    assert obligations.zdrowotna_base == expected_base
+    assert obligations.skladka_zdrowotna == expected_zdrowotna
+
+
+def test_ryczalt_without_annual_revenue_refuses():
+    """Без годового przychodu ступень неизвестна — считать отказываемся, а не гадаем."""
+    with pytest.raises(ValueError, match="annual_revenue"):
+        ZUSCalculator.calculate_monthly_obligations(
+            profile=_jdg_profile(date(2020, 1, 1), regime=TaxRegime.RYCZALT),
+            target_month=date(2025, 5, 1),
+        )
+
+
+def test_ryczalt_unknown_year_refuses():
+    """Года без таблицы przeciętnego wynagrodzenia -> Odmowa kalkulacji."""
+    with pytest.raises(ValueError, match="Odmowa kalkulacji"):
+        ZUSConstants.get_ryczalt_zdrowotna_base(2030, Decimal('100000.00'))

@@ -85,7 +85,12 @@ def test_full_year_2025_transition_case():
         # Оплачивается только медицинский взнос (12000 * 9% = 1080.00 zł):
         assert zus_res.skladka_zdrowotna == Decimal('1080.00')
         assert zus_res.total_zus_do_zaplaty == Decimal('1080.00')
-        assert "ZUS ZZA" in zus_res.forms_required
+        # Регистрационная ZZA подаётся только в месяц открытия JDG (октябрь);
+        # ноябрь и декабрь — обычная месячная декларация.
+        if target_month == date(2025, 10, 1):
+            assert zus_res.forms_required == ["ZUS DRA", "ZUS ZZA"]
+        else:
+            assert zus_res.forms_required == ["ZUS DRA"]
 
     # -------------------------------------------------------------
     # ЭТАП 2: Подготовка данных из PIT-11 за 2025 год
