@@ -26,7 +26,7 @@ from segregator.domain.models import (
     TaxpayerProfile,
     TaxRegime,
     SyncState,
-    mask_iban,
+    mask_sensitive_fields,
 )
 from segregator.orchestrator.state import AccountingGraphState
 from segregator.orchestrator.graph import build_accounting_graph
@@ -265,12 +265,13 @@ class SegregatorService:
             )
             doc_id = cur.lastrowid
 
+            # Маскируем ДО ветвления: набор полей не должен зависеть от того,
+            # завелась ли запись KPiR. Проверка идёт по имени поля, поэтому
+            # numer_konta/nr_konta/rachunek ловятся наравне с iban.
+            facts_dict = mask_sensitive_fields(facts.model_dump())
+
             if state.kpir_entry:
                 kp = state.kpir_entry
-                facts_dict = facts.model_dump()
-                if "fields" in facts_dict and "iban" in facts_dict["fields"]:
-                    raw_val = facts_dict["fields"]["iban"].get("value")
-                    facts_dict["fields"]["iban"]["value"] = mask_iban(str(raw_val)) if raw_val else None
 
                 vehicle_usage = "mixed" if (state.proposal and state.proposal.pit_cost_ratio == 0.75) else None
 

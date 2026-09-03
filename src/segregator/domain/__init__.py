@@ -23,6 +23,8 @@ from segregator.domain.models import (
     ZUSObligations,
     SyncState,
     mask_iban,
+    mask_sensitive_fields,
+    is_sensitive_field_name,
 )
 from segregator.domain.zus import ZUSCalculator, ZUSConstants
 from segregator.domain.invariants import InvariantEngine
@@ -48,6 +50,8 @@ __all__ = [
     "ZUSObligations",
     "SyncState",
     "mask_iban",
+    "mask_sensitive_fields",
+    "is_sensitive_field_name",
     "ZUSCalculator",
     "ZUSConstants",
     "InvariantEngine",
