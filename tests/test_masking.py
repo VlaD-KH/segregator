@@ -46,7 +46,23 @@ def test_mask_iban_edge_cases():
 
 @pytest.mark.parametrize(
     "name",
-    ["iban", "numer_konta", "nr_konta", "rachunek_bankowy", "konto", "pesel", "card_number"],
+    [
+        "iban",
+        "konto",
+        "numer_konta",
+        "nr_konta",
+        # Родительный падеж: `rachunek` литералом сюда не попадал, а
+        # `numer_rachunku` — самое частое имя счёта на польской фактуре.
+        "rachunek_bankowy",
+        "numer_rachunku",
+        "nr_rachunku",
+        "rachunek_bankowy_sprzedawcy",
+        "swift",
+        "pesel",
+        "card_number",
+        "numer_karty",
+        "numer_karty_platniczej",
+    ],
 )
 def test_sensitive_names_detected(name):
     """Счёт могут назвать по-разному — точечное совпадение по «iban» их не ловило."""
@@ -55,14 +71,21 @@ def test_sensitive_names_detected(name):
 
 @pytest.mark.parametrize(
     "name",
-    ["nip_sprzedawcy", "netto", "vat", "nazwa_sprzedawcy", "data_wystawienia", "kontrahent"],
+    [
+        "nip_sprzedawcy",
+        "netto",
+        "vat",
+        "nazwa_sprzedawcy",
+        "data_wystawienia",
+        # Слова, начинающиеся с тех же основ: слишком жадный шаблон затёр бы
+        # имя контрагента и номенклатуру вместе с номерами счетов и карт.
+        "kontrahent",
+        "kartoteka",
+        "kartka_pocztowa",
+    ],
 )
 def test_business_fields_not_masked(name):
-    """NIP — открытый идентификатор предприятия, инвариант 3 его не перечисляет.
-
-    `kontrahent` здесь неслучайно: он начинается на «kont», и слишком жадный
-    шаблон затёр бы имя контрагента вместе с номерами счетов.
-    """
+    """NIP — открытый идентификатор предприятия, инвариант 3 его не перечисляет."""
     assert is_sensitive_field_name(name) is False
 
 
@@ -114,6 +137,8 @@ def test_account_number_never_reaches_database(tmp_path):
             "vat": ExtractedField(value=230.0, source=DataSource.OCR, confidence=0.98),
             "brutto": ExtractedField(value=1230.0, source=DataSource.OCR, confidence=0.98),
             "numer_konta": ExtractedField(value=IBAN, source=DataSource.OCR, confidence=0.95),
+            # Родительный падеж — самое частое имя счёта на польской фактуре.
+            "numer_rachunku": ExtractedField(value=IBAN, source=DataSource.OCR, confidence=0.95),
         },
         decision=AgentDecision.OK,
     )
@@ -132,3 +157,4 @@ def test_account_number_never_reaches_database(tmp_path):
         assert IBAN not in raw, "номер счёта лёг в БД открытым текстом"
         stored = json.loads(raw)
         assert stored["fields"]["numer_konta"]["value"] == "PL**...2874"
+        assert stored["fields"]["numer_rachunku"]["value"] == "PL**...2874"

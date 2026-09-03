@@ -117,10 +117,16 @@ def mask_iban(iban: Optional[str]) -> Optional[str]:
 # (docs/DATA_BOUNDARY.md, инвариант 3). Ключ «iban» — лишь один из способов
 # назвать счёт: реальные извлечения дают numer_konta / nr_konta / rachunek,
 # и точечное совпадение по строке "iban" их не ловило.
-# `kont[oa]` — а не просто `kont`: нужно поймать и konto, и генитив konta
-# (numer_konta), но не задеть kontrahent, который маскировать нельзя.
-_ACCOUNT_FIELD_RE = re.compile(r"iban|kont[oa]|rachunek|account", re.IGNORECASE)
-_IDENTITY_FIELD_RE = re.compile(r"pesel|card_?number|nr_?karty", re.IGNORECASE)
+# Польские имена полей склоняются, и точный литерал ловит только один падеж:
+# `rachunek` не совпадает с `numer_rachunku` — а это САМОЕ частое название
+# банковского счёта на фактуре. Поэтому основы, а не полные слова.
+#   kont[oa]  — konto, numer_konta; но не kontrahent (там `kontr`)
+#   rachun    — rachunek, numer_rachunku, rachunek_bankowy_sprzedawcy
+#   kart[ayęi]— karta, numer_karty, kartę; но не kartoteka/kartka (там `karto`/`kartk`)
+# Перекос сознательно в сторону лишней маски: не замаскировать счёт дороже,
+# чем замаскировать поле, которое счётом не было.
+_ACCOUNT_FIELD_RE = re.compile(r"iban|kont[oa]|rachun|account|swift|bic", re.IGNORECASE)
+_IDENTITY_FIELD_RE = re.compile(r"pesel|card_?number|kart[ayęi]|dowod_osobisty", re.IGNORECASE)
 
 # NIP сознательно не маскируется: это открытый идентификатор предприятия,
 # инвариант 3 перечисляет PESEL, IBAN и номера карт.

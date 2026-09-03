@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import platform
 import shutil
 import sys
+import tempfile
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -58,15 +58,10 @@ def _load_settings_or_exit() -> Settings:
         raise typer.Exit(code=1)
 
 
-def _resolve_workspace_root(settings: Settings) -> Path:
-    """Корень рабочего пространства: БД, blobs/, archiwum/, rejestry/, logs/.
-
-    Единственная точка, где ARCHIVE_DIR можно перенаправить. `SEGREGATOR_ARCHIVE_DIR`
-    двигает корень целиком — иначе прогон, считающий себя изолированным, всё равно
-    писал бы БД и логи в боевой архив (контур: docs/DATA_BOUNDARY.md, инвариант 4).
-    """
-    override = os.environ.get("SEGREGATOR_ARCHIVE_DIR")
-    return Path(override) if override else settings.archive_dir
+# Корень рабочего пространства — всегда settings.archive_dir. Отдельного
+# переключателя SEGREGATOR_ARCHIVE_DIR больше нет: он двигал только часть путей,
+# создавая два расходящихся рабочих пространства, и заводил второй механизм
+# конфига рядом с ARCHIVE_DIR, которым уже пользуется conftest.isolated_project.
 
 
 @app.command()
@@ -192,15 +187,14 @@ def demo_run() -> None:
     - Консолидация годового отчета PIT-36 за 2025 год
     """
     settings = _load_settings_or_exit()
-    workspace = _resolve_workspace_root(settings)
-    slog.configure_logging(workspace / "logs")
+    slog.configure_logging(settings.archive_dir / "logs")
     log = slog.get_logger("cli.demo_run")
 
     typer.secho("\n=======================================================", fg=typer.colors.CYAN, bold=True)
     typer.secho("   SEGREGATOR — ДЕМОНСТРАЦИОННЫЙ ПРОГОН СИСТЕМЫ       ", fg=typer.colors.WHITE, bg=typer.colors.BLUE, bold=True)
     typer.secho("=======================================================\n", fg=typer.colors.CYAN, bold=True)
 
-    service = SegregatorService(workspace_root=workspace)
+    service = SegregatorService(workspace_root=settings.archive_dir)
 
     profile = TaxpayerProfile(
         pesel_masked="900101*****",
@@ -219,11 +213,11 @@ def demo_run() -> None:
         ]
     )
 
-    # Синтетические демо-фактуры кладём в перенаправляемый корень, а не в
-    # settings.archive_dir: иначе они оседают там, куда указывает ARCHIVE_DIR
-    # (однажды это была папка Google Drive, и заглушки уехали в git).
-    demo_tmp_dir = workspace / "demo_temp"
-    demo_tmp_dir.mkdir(parents=True, exist_ok=True)
+    # Синтетические входные «фактуры» демо-прогона — во временный каталог ОС,
+    # а не в архив. Пока они писались в settings.archive_dir, они оседали там,
+    # куда указывает ARCHIVE_DIR: однажды это была папка Google Drive, и
+    # заглушки FV_2025_11_*.pdf уехали оттуда в git.
+    demo_tmp_dir = Path(tempfile.mkdtemp(prefix="segregator-demo-"))
 
     # 1. Документ 1: Фактура продаж (B2B IT Consulting)
     f1_path = demo_tmp_dir / "FV_2025_11_001_Sprzedaz.pdf"
@@ -359,7 +353,7 @@ def process(
         raise typer.Exit(code=1)
 
     settings = _load_settings_or_exit()
-    service = SegregatorService(workspace_root=_resolve_workspace_root(settings))
+    service = SegregatorService(workspace_root=settings.archive_dir)
 
     profile = TaxpayerProfile(
         pesel_masked="900101*****",
@@ -388,6 +382,6 @@ def report(
         raise typer.Exit(code=1)
 
     settings = _load_settings_or_exit()
-    service = SegregatorService(workspace_root=_resolve_workspace_root(settings))
+    service = SegregatorService(workspace_root=settings.archive_dir)
     out_path = service.generate_monthly_register(y, m)
     typer.secho(f"Реестр успешно сгенерирован: {out_path}", fg=typer.colors.GREEN, bold=True)
