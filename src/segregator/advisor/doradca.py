@@ -7,26 +7,11 @@ src/segregator/advisor/doradca.py
 """
 
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict, List, Optional
-from pydantic import BaseModel, Field
+from typing import List
 
 from segregator.tax.pit import PITCalculator, PITConstants
-from segregator.domain.models import TaxRegime, AdvisoryReport, AdvisoryScenarioItem
-
-
-class RegimeScenarioDetail(BaseModel):
-    """Детализация сценария для внутреннего анализа."""
-    regime_name: str
-    gross_revenue: Decimal
-    tax_costs: Decimal
-    social_zus: Decimal
-    health_zus: Decimal
-    pit_due: Decimal
-    total_burden: Decimal
-    net_income_on_hand: Decimal
-    effective_tax_rate_percent: Decimal
-    pros: List[str] = Field(default_factory=list)
-    cons: List[str] = Field(default_factory=list)
+from segregator.domain.zus import ZUSConstants
+from segregator.domain.models import DISCLAIMER_PL, AdvisoryReport, AdvisoryScenarioItem
 
 
 class AgentDoradca:
@@ -46,6 +31,9 @@ class AgentDoradca:
         """
         Проводит расчет и сравнение трех главных налоговых режимов Польши.
         Возвращает AdvisoryReport, строго валидный против agents/schemas/advisory_report.json.
+
+        `year` больше не декоративный: год без нормативных таблиц приводит к
+        отказу считать (ValueError), а не к молчаливому счёту по числам 2025.
         """
         assumptions = [
             f"Roczne przychody: {annual_revenue} zł, roczne koszty (KUP): {annual_costs} zł.",
@@ -85,7 +73,8 @@ class AgentDoradca:
         # -------------------------------------------------------------
         liniowy_income = max(Decimal('0.00'), annual_revenue - annual_costs - social_zus_annual)
         liniowy_zdrowotna = (liniowy_income * Decimal('0.049')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        liniowy_base = max(Decimal('0.00'), liniowy_income - min(liniowy_zdrowotna, PITConstants.LINIOWY_ZDROWOTNA_MAX_2025))
+        liniowy_zdrowotna_limit = PITConstants.get_liniowy_zdrowotna_max(year)
+        liniowy_base = max(Decimal('0.00'), liniowy_income - min(liniowy_zdrowotna, liniowy_zdrowotna_limit))
         liniowy_pit = (liniowy_base * Decimal('0.19')).quantize(Decimal('1'), rounding=ROUND_HALF_UP).quantize(Decimal('0.01'))
         liniowy_burden = liniowy_pit + social_zus_annual + liniowy_zdrowotna
         liniowy_net = annual_revenue - annual_costs - liniowy_burden
@@ -107,7 +96,16 @@ class AgentDoradca:
         # -------------------------------------------------------------
         # 3. Сценарий C: Ryczałt ewidencjonowany
         # -------------------------------------------------------------
-        ryczalt_zdrowotna = Decimal('8760.00')
+        # Годовая składka zdrowotna на ryczałcie: 12 × (ступень базы × 9%).
+        # Ступень выбирается по годовому przychodowi (60k / 300k), база — это
+        # przeciętne wynagrodzenie w sektorze przedsiębiorstw за IV кв. прошлого
+        # года. Раньше здесь стояло фиксированное 8760.00 без года и без ступеней.
+        # TODO(Фаза 4): таблица переезжает в rates/<year>.toml.
+        ryczalt_zdrowotna_base = ZUSConstants.get_ryczalt_zdrowotna_base(year, annual_revenue)
+        ryczalt_zdrowotna = (
+            (ryczalt_zdrowotna_base * ZUSConstants.RATE_ZDROWOTNA_SKALA)
+            .quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) * 12
+        )
         ryczalt_base = max(Decimal('0.00'), annual_revenue - social_zus_annual - (ryczalt_zdrowotna * Decimal('0.5')))
         ryczalt_pit = (ryczalt_base * ryczalt_rate).quantize(Decimal('1'), rounding=ROUND_HALF_UP).quantize(Decimal('0.01'))
         ryczalt_burden = ryczalt_pit + social_zus_annual + ryczalt_zdrowotna
@@ -130,7 +128,11 @@ class AgentDoradca:
         note = (
             f"Analiza progów: Dochód wynosi {skala_income} zł. "
             + ("Przekroczono próg 120 000 zł na skali. " if skala_income > Decimal('120000.00') else "Dochód mieści się w I progu 12%. ")
-            + "Przejście na Sp. z o.o. (Estoński CIT 9%) warto rozważyć przy zyskach powyżej 250 000 zł rocznie."
+            # Ставки эстонского CIT — 10% для małego podatnika i rozpoczynającego
+            # działalność, 20% для остальных (art. 28o ustawy o CIT). 9% — это
+            # обычный CIT для małych podatników (art. 19 ust. 1 pkt 2), другой режим.
+            + "Przejście na Sp. z o.o. (Estoński CIT: 10% dla małego podatnika, "
+            + "20% dla pozostałych) warto rozważyć przy zyskach powyżej 250 000 zł rocznie."
         )
 
         return AdvisoryReport(
@@ -138,5 +140,5 @@ class AgentDoradca:
             assumptions=assumptions,
             unknowns=["Plany zakupowe środków trwałych w kolejnych kwartałach", "Prawo do ulgi IP BOX"],
             note=note[:900],
-            disclaimer="To jest kalkulacja, a nie doradztwo podatkowe. Wszelkie decyzje podejmuje przedsiębiorca."
+            disclaimer=DISCLAIMER_PL,
         )

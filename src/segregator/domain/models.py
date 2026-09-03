@@ -91,6 +91,18 @@ class TaxRegime(str, Enum):
     CIT_ESTONSKI = "cit_estonski"
 
 
+# Обязательный дисклеймер отчёта советника. Юридическая граница проекта:
+# система готовит расчёт для бухгалтера, а не даёт налоговую консультацию
+# (CLAUDE.md «Юридическая граница», agents/schemas/advisory_report.json).
+# Один источник строки на модель, схему и тест.
+DISCLAIMER_PL = (
+    "To jest kalkulacja, a nie doradztwo podatkowe. "
+    "Wszelkie decyzje podejmuje przedsiębiorca."
+)
+# Несущая часть — именно отрицание; проверяется валидатором в нижнем регистре.
+DISCLAIMER_REQUIRED_PHRASE = "nie doradztwo podatkowe"
+
+
 def mask_iban(iban: Optional[str]) -> Optional[str]:
     """Маскирование IBAN для соблюдения RODO/DATA_BOUNDARY."""
     if not iban:
@@ -324,9 +336,23 @@ class AdvisoryReport(BaseModel):
     assumptions: List[str] = Field(min_length=1)
     unknowns: List[str] = Field(default_factory=list)
     note: str = Field(default="", max_length=900)
-    disclaimer: str = Field(
-        default="To jest kalkulacja, a nie doradztwo podatkowe. Wszelkie decyzje podejmuje przedsiębiorca."
-    )
+    disclaimer: str = Field(default=DISCLAIMER_PL, min_length=1)
+
+    @field_validator("disclaimer")
+    @classmethod
+    def _disclaimer_states_it_is_not_advice(cls, v: str) -> str:
+        """Юридическая граница из CLAUDE.md держится валидатором, а не дефолтом.
+
+        Отрицание — несущая часть фразы: отчёт обязан говорить, что он расчёт,
+        а НЕ налоговая консультация. Прежде поле держалось только значением по
+        умолчанию, и `disclaimer=""` проходил насквозь.
+        """
+        if DISCLAIMER_REQUIRED_PHRASE not in v.lower():
+            raise ValueError(
+                f"disclaimer обязан содержать «{DISCLAIMER_REQUIRED_PHRASE}»: "
+                f"отчёт — расчёт, а не налоговая консультация"
+            )
+        return v
 
 
 # =========================================================================
