@@ -37,3 +37,8 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Без этого pytest берёт `segregator` из глобального editable-install (а он может
+# указывать на другой worktree) и молча тестирует чужой код. С `pythonpath` тесты
+# всегда о том дереве, в котором запущены, — и свежий чекаут прогоняется без
+# `pip install -e .` и без ручного PYTHONPATH.
+pythonpath = ["src"]
