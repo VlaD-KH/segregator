@@ -158,3 +158,45 @@ def test_account_number_never_reaches_database(tmp_path):
         stored = json.loads(raw)
         assert stored["fields"]["numer_konta"]["value"] == "PL**...2874"
         assert stored["fields"]["numer_rachunku"]["value"] == "PL**...2874"
+
+
+# ---------------------------------------------------------------------------
+# Контракт «значение поля — скаляр»: допущение, на котором держится маскирование
+# ---------------------------------------------------------------------------
+
+def test_schema_keeps_field_values_scalar():
+    """Схема обязана держать `value` скалярным — на этом стоит маскирование.
+
+    `mask_sensitive_fields` обходит один уровень словаря `fields`, и это
+    сознательно: `document_facts.json` разрешает `value` только
+    string|number|null. Если кто-то добавит вложенность (позиции фактуры
+    `pozycje[]`, под-объект `platnosc` с реквизитами), маскирование перестанет
+    быть полным — и узнать об этом надо здесь, а не из утечки в БД.
+    """
+    import json
+    from pathlib import Path
+
+    schema_path = Path(__file__).resolve().parents[1] / "agents" / "schemas" / "document_facts.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    value_schema = schema["properties"]["fields"]["additionalProperties"]["properties"]["value"]
+    assert set(value_schema["type"]) == {"string", "number", "null"}, (
+        "document_facts.json изменил тип `value`. Маскирование в "
+        "mask_sensitive_fields обходит только плоский уровень — прежде чем "
+        "расширять схему, научите его обходить новую форму."
+    )
+
+
+def test_composite_sensitive_value_raises_instead_of_leaking():
+    """Составное значение чувствительного поля — громкая ошибка, а не тихий пропуск."""
+    facts = {
+        "fields": {
+            "numer_konta": {
+                "value": {"iban": IBAN, "bank": "PKO"},
+                "source": "ocr",
+                "confidence": 0.9,
+            }
+        }
+    }
+    with pytest.raises(TypeError, match="составное"):
+        mask_sensitive_fields(facts)

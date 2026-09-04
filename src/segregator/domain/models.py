@@ -156,6 +156,17 @@ def mask_sensitive_fields(facts_dict: Dict[str, Any]) -> Dict[str, Any]:
         value = field.get("value")
         if value is None:
             continue
+        # Схема держит `value` скалярным (string|number|null), и рекурсивный
+        # обход здесь был бы защитой от формы, которую контракт запрещает.
+        # Но если контракт когда-нибудь изменится, молча пропустить составное
+        # значение мимо маски нельзя — падаем громко.
+        if isinstance(value, (dict, list)):
+            raise TypeError(
+                f"Поле «{name}» чувствительное, но значение составное "
+                f"({type(value).__name__}). Схема document_facts.json допускает "
+                f"только string|number|null; маскирование составных значений "
+                f"не реализовано — реализуйте его прежде, чем менять схему."
+            )
         field["value"] = (
             mask_iban(str(value)) if _ACCOUNT_FIELD_RE.search(name) else "****"
         )

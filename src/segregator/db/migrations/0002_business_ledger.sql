@@ -21,7 +21,10 @@ CREATE TABLE IF NOT EXISTS kpir_entries (
     vehicle_usage          TEXT,                   -- 'mixed' | 'business_only' | 'private'
     kup_ratio              REAL DEFAULT 1.00,
     vat_ratio              REAL DEFAULT 1.00,
-    raw_facts_json         TEXT,                   -- Полный сериализованный JSON DocumentFacts
+    raw_facts_json         TEXT,                   -- DocumentFacts в JSON, ЗАМАСКИРОВАННЫЙ:
+                                                   -- счета, PESEL и номера карт проходят через
+                                                   -- mask_sensitive_fields() перед записью
+                                                   -- (DATA_BOUNDARY.md, инвариант 3). Не сырьё.
     created_at             TEXT NOT NULL           -- ISO-8601 UTC
 );
 
