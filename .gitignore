@@ -22,3 +22,7 @@ Google drive/
 antigravity_debug.log
 .claude/worktrees/
 /segregator-agents/
+
+# Доска объявлений переехала в общий .git/coord/ — одна на все worktree.
+# Копия в рабочем дереве снова развела бы агентов по разным файлам.
+coord/board.jsonl
