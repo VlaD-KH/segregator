@@ -153,3 +153,93 @@ def test_advisory_report_schema_validation(schemas_dir):
 
     data = json.loads(report.model_dump_json(exclude_none=True))
     jsonschema.validate(instance=data, schema=schema)
+
+
+# ===========================================================================
+# Обратная сторона: модель обязана ОТВЕРГАТЬ то, что отвергает схема
+# ===========================================================================
+# Тесты выше односторонние: они строят заведомо валидный объект и проверяют,
+# что он проходит схему. Так нельзя поймать ОСЛАБЛЕНИЕ контракта — снятие
+# min_length с модели не даёт ни одного красного теста, и модель со схемой
+# расходятся в сторону послабления бесшумно. Ниже — обратное направление.
+
+from pydantic import ValidationError  # noqa: E402
+
+
+def _schema(name: str) -> dict:
+    path = Path(__file__).resolve().parents[1] / "agents" / "schemas" / f"{name}.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _one_scenario():
+    return AdvisoryScenarioItem(name="Skala", figures={"przychod": 1.0}, tradeoff="t")
+
+
+def test_advisory_report_requires_at_least_two_scenarios():
+    """Схема требует minItems: 2 — модель обязана требовать столько же."""
+    assert _schema("advisory_report")["properties"]["scenarios"]["minItems"] == 2
+    with pytest.raises(ValidationError):
+        AdvisoryReport(scenarios=[_one_scenario()], assumptions=["a"])
+
+
+def test_advisory_report_requires_assumptions():
+    """Сравнение режимов без единого допущения — не отчёт советника."""
+    assert _schema("advisory_report")["properties"]["assumptions"]["minItems"] == 1
+    with pytest.raises(ValidationError):
+        AdvisoryReport(scenarios=[_one_scenario(), _one_scenario()], assumptions=[])
+
+
+def test_advisory_report_rejects_empty_disclaimer():
+    """Юридическая граница: пустой дисклеймер отвергается моделью."""
+    assert _schema("advisory_report")["properties"]["disclaimer"]["minLength"] == 1
+    with pytest.raises(ValidationError):
+        AdvisoryReport(
+            scenarios=[_one_scenario(), _one_scenario()],
+            assumptions=["a"],
+            disclaimer="",
+        )
+
+
+def test_booking_proposal_rejects_ratios_outside_the_enum():
+    """vat_deduction_ratio и pit_cost_ratio ограничены перечислением схемы."""
+    s = _schema("booking_proposal")["properties"]
+    assert set(s["vat_deduction_ratio"]["enum"]) == {0, 0.5, 1, None}
+    assert set(s["pit_cost_ratio"]["enum"]) == {0, 0.75, 1, None}
+
+    base = dict(category="Koszty", confidence=1.0, basis="rule:test", decision=AgentDecision.OK)
+    with pytest.raises(ValidationError):
+        BookingProposal(**base, vat_deduction_ratio=0.75)  # 0.75 — доля PIT, не VAT
+    with pytest.raises(ValidationError):
+        BookingProposal(**base, pit_cost_ratio=0.5)  # 0.5 — доля VAT, не PIT
+
+
+def test_extracted_field_rejects_unknown_source():
+    """Источник поля — закрытое перечисление: llm/ocr/ksef/…, но не что попало."""
+    with pytest.raises(ValidationError):
+        ExtractedField(value="x", source="wikipedia", confidence=1.0)
+
+
+def test_extracted_field_confidence_is_bounded():
+    """Уверенность вне [0, 1] — не уверенность."""
+    with pytest.raises(ValidationError):
+        ExtractedField(value="x", source=DataSource.OCR, confidence=1.4)
+    with pytest.raises(ValidationError):
+        ExtractedField(value="x", source=DataSource.OCR, confidence=-0.1)
+
+
+def test_models_forbid_extra_fields_like_their_schemas():
+    """additionalProperties: false в схеме = extra="forbid" в модели.
+
+    Иначе модель молча примет поле, которого в контракте нет, и оно уедет в БД.
+    """
+    for name in ("document_facts", "booking_proposal", "advisory_report"):
+        assert _schema(name)["additionalProperties"] is False, name
+
+    with pytest.raises(ValidationError):
+        BookingProposal(
+            category="Koszty",
+            confidence=1.0,
+            basis="rule:test",
+            decision=AgentDecision.OK,
+            nieznane_pole="сюрприз",
+        )

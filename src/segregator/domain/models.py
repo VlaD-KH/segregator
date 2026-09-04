@@ -99,8 +99,9 @@ DISCLAIMER_PL = (
     "To jest kalkulacja, a nie doradztwo podatkowe. "
     "Wszelkie decyzje podejmuje przedsiębiorca."
 )
-# Несущая часть — именно отрицание; проверяется валидатором в нижнем регистре.
-DISCLAIMER_REQUIRED_PHRASE = "nie doradztwo podatkowe"
+def _normalise_disclaimer(text: str) -> str:
+    """Схлопнуть пробелы и регистр — сравнение не должно падать из-за вёрстки."""
+    return re.sub(r"\s+", " ", text or "").strip().casefold()
 
 
 def mask_iban(iban: Optional[str]) -> Optional[str]:
@@ -125,8 +126,12 @@ def mask_iban(iban: Optional[str]) -> Optional[str]:
 #   kart[ayęi]— karta, numer_karty, kartę; но не kartoteka/kartka (там `karto`/`kartk`)
 # Перекос сознательно в сторону лишней маски: не замаскировать счёт дороже,
 # чем замаскировать поле, которое счётом не было.
-_ACCOUNT_FIELD_RE = re.compile(r"iban|kont[oa]|rachun|account|swift|bic", re.IGNORECASE)
-_IDENTITY_FIELD_RE = re.compile(r"pesel|card_?number|kart[ayęi]|dowod_osobisty", re.IGNORECASE)
+# `kont[oa](?!kt)` — иначе основа съедала `kontakt`, `dane_kontaktowe`,
+# `kontakt_email`, и адрес почты переписывался в фальшивый IBAN.
+# `dowod` и `kart` как основы: `dowod_osobistego`, `nr_dowodu`, `kartą` —
+# те же падежи, ради которых основы и вводились.
+_ACCOUNT_FIELD_RE = re.compile(r"iban|kont[oa](?!kt)|rachun|account|swift|bic", re.IGNORECASE)
+_IDENTITY_FIELD_RE = re.compile(r"pesel|card_?number|kart[ayęąi]|dowod", re.IGNORECASE)
 
 # NIP сознательно не маскируется: это открытый идентификатор предприятия,
 # инвариант 3 перечисляет PESEL, IBAN и номера карт.
@@ -357,17 +362,23 @@ class AdvisoryReport(BaseModel):
 
     @field_validator("disclaimer")
     @classmethod
-    def _disclaimer_states_it_is_not_advice(cls, v: str) -> str:
-        """Юридическая граница из CLAUDE.md держится валидатором, а не дефолтом.
+    def _disclaimer_is_the_canonical_phrase(cls, v: str) -> str:
+        """Дисклеймер — фиксированная юридическая формулировка, не свободный текст.
 
-        Отрицание — несущая часть фразы: отчёт обязан говорить, что он расчёт,
-        а НЕ налоговая консультация. Прежде поле держалось только значением по
-        умолчанию, и `disclaimer=""` проходил насквозь.
+        Поиск подстроки здесь не работает в обе стороны: «Niniejsza analiza nie
+        stanowi doradztwa podatkowego» — правильная фраза, которую подстрочная
+        проверка отвергала, а «…to jest pełne doradztwo podatkowe» — прямо
+        противоположное утверждение, которое она пропускала. Поэтому сверка
+        идёт с канонической константой целиком.
+
+        Нужна другая формулировка — меняется DISCLAIMER_PL, и меняется
+        осознанно: это юридическая граница из CLAUDE.md, а не поле для правки
+        на лету.
         """
-        if DISCLAIMER_REQUIRED_PHRASE not in v.lower():
+        if _normalise_disclaimer(v) != _normalise_disclaimer(DISCLAIMER_PL):
             raise ValueError(
-                f"disclaimer обязан содержать «{DISCLAIMER_REQUIRED_PHRASE}»: "
-                f"отчёт — расчёт, а не налоговая консультация"
+                "disclaimer обязан совпадать с канонической формулировкой "
+                f"DISCLAIMER_PL: «{DISCLAIMER_PL}»"
             )
         return v
 

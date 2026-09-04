@@ -113,3 +113,30 @@ def test_advisor_refuses_year_without_tables():
             annual_costs=Decimal('40000.00'),
             year=2030,
         )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Niniejszy dokument stanowi kalkulację i nie jest doradztwem podatkowym.",
+        "To nie jest doradztwo podatkowe.",
+        "Niniejsza analiza nie stanowi doradztwa podatkowego.",
+        # Прямо противоположное утверждение, содержащее нужные слова.
+        "Czy to nie doradztwo podatkowe? Owszem, to jest pełne doradztwo podatkowe.",
+    ],
+)
+def test_disclaimer_accepts_only_the_canonical_wording(text):
+    """Ни свои формулировки, ни отрицающая её подделка не проходят.
+
+    Подстрочная проверка ошибалась в обе стороны: отвергала три канонических
+    польских формулировки и пропускала фразу, утверждающую обратное.
+    """
+    with pytest.raises(ValidationError):
+        AdvisoryReport(scenarios=_minimal_scenarios(), assumptions=["a"], disclaimer=text)
+
+
+def test_disclaimer_survives_reformatting():
+    """Перенос строки и лишние пробелы вёрстки не должны ломать сверку."""
+    reflowed = "  To jest kalkulacja, a nie doradztwo podatkowe.\n  Wszelkie decyzje podejmuje przedsiębiorca.  "
+    report = AdvisoryReport(scenarios=_minimal_scenarios(), assumptions=["a"], disclaimer=reflowed)
+    assert report.disclaimer == reflowed
