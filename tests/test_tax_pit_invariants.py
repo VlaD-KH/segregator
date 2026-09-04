@@ -172,3 +172,86 @@ def test_invariant_engine_all_checks():
         credits=[Decimal('1200.00')]
     )
     assert inv6_ok.passed is True
+
+
+# ---------------------------------------------------------------------------
+# Ветки LINIOWY и RYCZALT аванса: до сих пор не исполнялись ни одним тестом
+# ---------------------------------------------------------------------------
+
+def test_jdg_advance_liniowy_uses_year_specific_health_limit():
+    """Лимит вычета zdrowotnej берётся по году периода, а не по константе 2025.
+
+    Годозависимый геттер был добавлен, но сам расчёт аванса остался на
+    константе 2025: за 2026 вычет обрезался на 12900 вместо 14100, то есть
+    занижался на 1200 zł. Ветка LINIOWY не исполнялась, и мутации это скрывали.
+    """
+    common = dict(
+        regime=TaxRegime.LINIOWY,
+        income_ytd=Decimal('300000.00'),
+        costs_ytd=Decimal('0.00'),
+        social_zus_paid_ytd=Decimal('0.00'),
+        health_zus_paid_ytd=Decimal('20000.00'),  # заведомо выше любого лимита
+    )
+
+    res_2025 = PITCalculator.calculate_monthly_jdg_advance(month="2025-12", **common)
+    res_2026 = PITCalculator.calculate_monthly_jdg_advance(month="2026-12", **common)
+
+    # 2025: база = 300000 - 12900 = 287100 -> 19% = 54549.00
+    assert res_2025.tax_base_ytd == Decimal('287100.00')
+    assert res_2025.tax_due_ytd == Decimal('54549.00')
+    # 2026: база = 300000 - 14100 = 285900 -> 19% = 54321.00
+    assert res_2026.tax_base_ytd == Decimal('285900.00')
+    assert res_2026.tax_due_ytd == Decimal('54321.00')
+    # Разница ровно в 1200 zł лимита, а не в нуле.
+    assert res_2025.tax_base_ytd - res_2026.tax_base_ytd == Decimal('1200.00')
+
+
+def test_jdg_advance_liniowy_rate_is_nineteen_percent():
+    """Ставка линейного налога — 19%, и она закреплена числом."""
+    res = PITCalculator.calculate_monthly_jdg_advance(
+        month="2025-06",
+        regime=TaxRegime.LINIOWY,
+        income_ytd=Decimal('100000.00'),
+        costs_ytd=Decimal('0.00'),
+        social_zus_paid_ytd=Decimal('0.00'),
+        health_zus_paid_ytd=Decimal('0.00'),
+    )
+    assert res.tax_base_ytd == Decimal('100000.00')
+    assert res.tax_due_ytd == Decimal('19000.00')
+
+
+def test_jdg_advance_ryczalt_deducts_half_of_health():
+    """Ryczałt: налог от выручки за вычетом 50% zdrowotnej и 100% социальных."""
+    res = PITCalculator.calculate_monthly_jdg_advance(
+        month="2025-06",
+        regime=TaxRegime.RYCZALT,
+        income_ytd=Decimal('200000.00'),
+        costs_ytd=Decimal('50000.00'),   # на ryczałcie расходы не вычитаются
+        social_zus_paid_ytd=Decimal('10000.00'),
+        health_zus_paid_ytd=Decimal('8000.00'),
+        ryczalt_rate=Decimal('0.12'),
+    )
+    # База = 200000 - 10000 - (8000 * 0.5) = 186000. Расходы игнорируются.
+    assert res.tax_base_ytd == Decimal('186000.00')
+    assert res.tax_due_ytd == Decimal('22320.00')
+
+
+def test_jdg_advance_rejects_period_without_year():
+    """Период без года -> отказ считать, а не тихий выбор лимита наугад."""
+    with pytest.raises(ValueError, match="Odmowa kalkulacji"):
+        PITCalculator.calculate_monthly_jdg_advance(
+            month="декабрь",
+            regime=TaxRegime.LINIOWY,
+            income_ytd=Decimal('100000.00'),
+            costs_ytd=Decimal('0.00'),
+            social_zus_paid_ytd=Decimal('0.00'),
+            health_zus_paid_ytd=Decimal('5000.00'),
+        )
+
+
+def test_liniowy_health_limit_is_year_keyed():
+    """Лимит вычета отличается по годам и отказывает на годе без таблицы."""
+    assert PITConstants.get_liniowy_zdrowotna_max(2025) == Decimal('12900.00')
+    assert PITConstants.get_liniowy_zdrowotna_max(2026) == Decimal('14100.00')
+    with pytest.raises(ValueError, match="Odmowa kalkulacji"):
+        PITConstants.get_liniowy_zdrowotna_max(2030)

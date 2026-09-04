@@ -386,3 +386,81 @@ def test_ryczalt_unknown_year_refuses():
     """Года без таблицы przeciętnego wynagrodzenia -> Odmowa kalkulacji."""
     with pytest.raises(ValueError, match="Odmowa kalkulacji"):
         ZUSConstants.get_ryczalt_zdrowotna_base(2030, Decimal('100000.00'))
+
+
+# ---------------------------------------------------------------------------
+# DUŻY ZUS: ступень с самыми большими суммами до сих пор не была закреплена
+# ---------------------------------------------------------------------------
+
+def test_duzy_zus_full_amounts_2025():
+    """Полная сетка dużego ZUS за 2025: база, каждый взнос, FP и итог.
+
+    Ступень проверялась только через determine_zus_stage — ни одна сумма не была
+    закреплена, и `AVERAGE_WAGES[2025]` вместе с множителем 0.60 можно было
+    менять, оставаясь зелёным.
+
+    База = 60% × 8673.00 = 5203.80
+      emerytalne  19.52% = 1015.78
+      rentowe      8.00% =  416.30
+      chorobowe    2.45% =  127.49
+      wypadkowe    1.67% =   86.90
+      FP+FS        2.45% =  127.49  (в total_spoleczne НЕ входит)
+      total_spoleczne    = 1646.47
+    """
+    obligations = ZUSCalculator.calculate_monthly_obligations(
+        profile=_jdg_profile(date(2020, 1, 1)),
+        target_month=date(2025, 5, 1),
+        jdg_monthly_profit=Decimal('10000.00'),
+        include_chorobowe=True,
+    )
+
+    assert obligations.stage == ZUSStage.DUZY_ZUS
+    assert obligations.spoleczne_base == Decimal('5203.80')
+    assert obligations.emerytalne == Decimal('1015.78')
+    assert obligations.rentowe == Decimal('416.30')
+    assert obligations.chorobowe == Decimal('127.49')
+    assert obligations.wypadkowe == Decimal('86.90')
+    assert obligations.fundusz_pracy == Decimal('127.49')
+    assert obligations.total_spoleczne == Decimal('1646.47')
+    # Fundusz Pracy идёт отдельной строкой декларации, но в итог к уплате входит.
+    assert obligations.total_zus_do_zaplaty == (
+        obligations.total_spoleczne + obligations.fundusz_pracy + obligations.skladka_zdrowotna
+    )
+
+
+def test_duzy_zus_base_is_sixty_percent_of_average_wage():
+    """Множитель базы dużego ZUS — ровно 60% от prognozowanego przeciętnego."""
+    obligations = ZUSCalculator.calculate_monthly_obligations(
+        profile=_jdg_profile(date(2020, 1, 1)),
+        target_month=date(2026, 5, 1),
+        jdg_monthly_profit=Decimal('10000.00'),
+    )
+    # 2026: 9420.00 × 0.60 = 5652.00
+    assert obligations.spoleczne_base == Decimal('5652.00')
+
+
+# ---------------------------------------------------------------------------
+# Пороги ryczałtu: ровно на границе, а не «где-то рядом»
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "revenue, expected_base",
+    [
+        (Decimal('60000.00'), Decimal('5129.51')),    # ровно порог -> ещё 60%
+        (Decimal('60000.01'), Decimal('8549.18')),    # на грош выше -> 100%
+        (Decimal('300000.00'), Decimal('8549.18')),   # ровно порог -> ещё 100%
+        (Decimal('300000.01'), Decimal('15388.52')),  # на грош выше -> 180%
+    ],
+)
+def test_ryczalt_thresholds_are_inclusive_at_the_boundary(revenue, expected_base):
+    """Границы 60 000 и 300 000 включаются в нижнюю ступень.
+
+    Параметризация «50k / 200k / 400k» проходила далеко от порогов, и сдвиг
+    RYCZALT_PROG_1 на тысячу оставался незамеченным.
+    """
+    obligations = ZUSCalculator.calculate_monthly_obligations(
+        profile=_jdg_profile(date(2020, 1, 1), regime=TaxRegime.RYCZALT),
+        target_month=date(2025, 5, 1),
+        annual_revenue=revenue,
+    )
+    assert obligations.zdrowotna_base == expected_base

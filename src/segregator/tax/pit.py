@@ -33,9 +33,6 @@ class PITConstants:
         2025: Decimal('12900.00'),
         2026: Decimal('14100.00'),
     }
-    # Совместимость: прежнее имя оставлено как значение 2025 года.
-    LINIOWY_ZDROWOTNA_MAX_2025 = Decimal('12900.00')
-
     @classmethod
     def get_liniowy_zdrowotna_max(cls, year: int) -> Decimal:
         if year not in cls.LINIOWY_ZDROWOTNA_MAX:
@@ -110,6 +107,17 @@ class PITCalculator:
             total_tax = tax_12 + tax_32
             return total_tax.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
+    @staticmethod
+    def _year_of(month: str) -> int:
+        """Год из периода «YYYY-MM». Годовые лимиты выбираются по нему."""
+        try:
+            return int(month.split("-")[0])
+        except (ValueError, AttributeError, IndexError):
+            raise ValueError(
+                f"Период «{month}» не в формате YYYY-MM — год неизвестен, "
+                f"годовой лимит выбрать не из чего. Odmowa kalkulacji."
+            )
+
     @classmethod
     def calculate_monthly_jdg_advance(
         cls,
@@ -140,8 +148,12 @@ class PITCalculator:
                 notes.append(f"Превышен порог 120 000 zł (база {tax_base_ytd} zł). Применена ставка 32% на сумму {tax_base_ytd - PITConstants.PROG_PODATKOWY} zł.")
                 
         elif regime == TaxRegime.LINIOWY:
-            # Вычет здоровья ограничен годовым лимитом
-            deductible_health = min(health_zus_paid_ytd, PITConstants.LINIOWY_ZDROWOTNA_MAX_2025)
+            # Лимит вычета zdrowotnej берётся по ГОДУ месяца, а не по константе 2025.
+            # Год известен из `month` — расчёт всегда за конкретный период.
+            deductible_health = min(
+                health_zus_paid_ytd,
+                PITConstants.get_liniowy_zdrowotna_max(cls._year_of(month)),
+            )
             raw_base = income_ytd - costs_ytd - social_zus_paid_ytd - deductible_health
             tax_base_ytd = max(Decimal('0.00'), raw_base.quantize(Decimal('1'), rounding=ROUND_HALF_UP).quantize(Decimal('0.01')))
             tax_due_ytd = (tax_base_ytd * PITConstants.STAWKA_LINIOWY).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)

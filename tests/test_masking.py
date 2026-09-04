@@ -62,6 +62,9 @@ def test_mask_iban_edge_cases():
         "card_number",
         "numer_karty",
         "numer_karty_platniczej",
+        "kartą",
+        "dowod_osobistego",
+        "nr_dowodu",
     ],
 )
 def test_sensitive_names_detected(name):
@@ -82,6 +85,11 @@ def test_sensitive_names_detected(name):
         "kontrahent",
         "kartoteka",
         "kartka_pocztowa",
+        # kontakt начинается на ту же основу, что konto/konta, но это адрес,
+        # а не счёт: жадный шаблон переписывал почту в фальшивый IBAN.
+        "kontakt",
+        "dane_kontaktowe",
+        "kontakt_email",
     ],
 )
 def test_business_fields_not_masked(name):
