@@ -36,6 +36,7 @@ __all__ = [
     "AgentDecision",
     "PeriodDateBasis",
     "EmploymentTypeKind",
+    "EmploymentType",
     "PayrollSource",
     "ZUSStage",
     "TaxRegime",
@@ -58,3 +59,8 @@ __all__ = [
     "ZUSConstants",
     "InvariantEngine",
 ]
+
+# Совместимость: на main это имя экспортировалось из пакета. Ветка его
+# переименовала, и молчаливое удаление публичного имени из __init__ ничем
+# не отмечено в диффе.
+EmploymentType = EmploymentTypeKind

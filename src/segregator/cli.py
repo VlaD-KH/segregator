@@ -217,7 +217,10 @@ def demo_run() -> None:
     # а не в архив. Пока они писались в settings.archive_dir, они оседали там,
     # куда указывает ARCHIVE_DIR: однажды это была папка Google Drive, и
     # заглушки FV_2025_11_*.pdf уехали оттуда в git.
-    demo_tmp_dir = Path(tempfile.mkdtemp(prefix="segregator-demo-"))
+    # ExitStack, а не mkdtemp: каждый прогон demo-run иначе оставлял каталог
+    # с заглушками навсегда.
+    _demo_tmp = tempfile.TemporaryDirectory(prefix="segregator-demo-")
+    demo_tmp_dir = Path(_demo_tmp.name)
 
     # 1. Документ 1: Фактура продаж (B2B IT Consulting)
     f1_path = demo_tmp_dir / "FV_2025_11_001_Sprzedaz.pdf"
