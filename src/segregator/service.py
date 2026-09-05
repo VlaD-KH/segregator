@@ -32,6 +32,7 @@ from segregator.orchestrator.state import AccountingGraphState
 from segregator.orchestrator.graph import build_accounting_graph
 from segregator.db.migrate import get_connection, migrate
 from segregator.ingest.blobs import store_blob as ingest_store_blob, blob_relative_path
+from segregator.accounting.period import next_lp
 
 
 class MonthNames:
@@ -119,9 +120,15 @@ class SegregatorService:
         """Считывает водяные знаки синхронизации для налогоплательщика."""
         conn = get_connection(self.db_path)
         try:
+            # NB: запрос ниже не фильтрует по nip — ни kpir_entries, ни documents
+            # не несут идентификатора налогоплательщика (система однопользовательская,
+            # см. CLAUDE.md). Параметр используется только для sync_watermarks ниже.
+            # Join через kpir_entries, а не kpir_quarantine, — намеренно: карантинный
+            # документ не должен считаться синхронизированным, иначе он ушёл бы в
+            # skipped_idle и никогда не переобработался бы после починки причины эскалации.
             rows = conn.execute(
                 """
-                SELECT b.sha256 
+                SELECT b.sha256
                 FROM blobs b
                 JOIN attachments a ON a.sha256 = b.sha256
                 JOIN documents d ON d.attachment_id = a.id
@@ -238,12 +245,17 @@ class SegregatorService:
                 )
                 att_id = cur_att_ins.lastrowid
 
+            # ON CONFLICT вместо голого INSERT: attachment_id UNIQUE (0001:35), а
+            # process_document повторно вызывается для документов, не попавших в
+            # kpir_entries (карантин, см. get_sync_state) — без этого повтор падал
+            # бы IntegrityError вместо переобработки.
             cur = conn.execute(
                 """
                 INSERT INTO documents (
                     attachment_id, doc_type, category, subcategory, confidence, decided_by,
                     doc_date, counterparty, nip, doc_number, net, vat, gross, currency, reviewed_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(attachment_id) DO NOTHING
                 """,
                 (
                     att_id,
@@ -263,53 +275,114 @@ class SegregatorService:
                     datetime.now(timezone.utc).isoformat()
                 )
             )
-            doc_id = cur.lastrowid
+            if cur.rowcount:
+                doc_id = cur.lastrowid
+            else:
+                doc_id = conn.execute(
+                    "SELECT id FROM documents WHERE attachment_id = ?", (att_id,)
+                ).fetchone()[0]
 
             # Маскируем ДО ветвления: набор полей не должен зависеть от того,
             # завелась ли запись KPiR. Проверка идёт по имени поля, поэтому
             # numer_konta/nr_konta/rachunek ловятся наравне с iban.
             facts_dict = mask_sensitive_fields(facts.model_dump())
 
+            # Human Gate: проводка в KPiR — только для подтверждённого документа.
+            # agent02 заполняет kpir_entry всегда, эскалация это или нет (graph.py:
+            # порядок узлов agent02 -> agent03 -> условный переход), поэтому раньше
+            # запись шла по одному условию «kpir_entry есть», а status не смотрелась
+            # вовсе. Любой status кроме "completed" (по факту — только
+            # "escalated_to_human", см. state.py) уходит в kpir_quarantine — тем же
+            # набором колонок, без lp (номер KPiR не выдаётся непроведённому
+            # документу — иначе в реестре осталась бы дыра) и с escalation_reason.
+            completed = state.status == "completed"
+
             if state.kpir_entry:
                 kp = state.kpir_entry
-
                 vehicle_usage = "mixed" if (state.proposal and state.proposal.pit_cost_ratio == 0.75) else None
+                kup_ratio = float(state.proposal.pit_cost_ratio) if (state.proposal and state.proposal.pit_cost_ratio is not None) else 1.0
+                vat_ratio = float(state.proposal.vat_deduction_ratio) if (state.proposal and state.proposal.vat_deduction_ratio is not None) else 1.0
 
-                conn.execute(
-                    """
-                    INSERT INTO kpir_entries (
-                        document_id, lp, entry_date, doc_number, counterparty_name, description,
-                        col_7_przychody, col_8_pozostale_przych, col_9_razem_przychody,
-                        col_10_zakup_towarow, col_11_koszty_uboczne, col_12_wynagrodzenia,
-                        col_13_pozostale_wyd, col_14_razem_wydatki, vat_amount,
-                        vehicle_usage, kup_ratio, vat_ratio, raw_facts_json, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        doc_id,
-                        kp.lp,
-                        kp.entry_date.isoformat(),
-                        kp.doc_number,
-                        kp.counterparty_name,
-                        kp.description,
-                        float(kp.col_7_przychody),
-                        float(kp.col_8_pozostale_przychody),
-                        float(kp.col_9_razem_przychody),
-                        float(kp.col_10_zakup_towarow),
-                        float(kp.col_11_koszty_uboczne),
-                        float(kp.col_12_wynagrodzenia),
-                        float(kp.col_13_pozostale_wydatki),
-                        float(kp.col_14_razem_wydatki),
-                        float(kp.vat_amount),
-                        vehicle_usage,
-                        float(state.proposal.pit_cost_ratio) if (state.proposal and state.proposal.pit_cost_ratio is not None) else 1.0,
-                        float(state.proposal.vat_deduction_ratio) if (state.proposal and state.proposal.vat_deduction_ratio is not None) else 1.0,
-                        json.dumps(facts_dict),
-                        datetime.now(timezone.utc).isoformat()
+                if completed:
+                    # MAX(lp)+1 в пределах года, в той же транзакции — образец уже
+                    # есть в этом файле (max_msg выше). kp.lp — константа 1 из
+                    # nodes.py (там нет доступа к БД), реальный номер даётся здесь.
+                    lp = next_lp(conn, kp.entry_date)
+                    conn.execute(
+                        """
+                        INSERT INTO kpir_entries (
+                            document_id, lp, entry_date, doc_number, counterparty_name, description,
+                            col_7_przychody, col_8_pozostale_przych, col_9_razem_przychody,
+                            col_10_zakup_towarow, col_11_koszty_uboczne, col_12_wynagrodzenia,
+                            col_13_pozostale_wyd, col_14_razem_wydatki, vat_amount,
+                            vehicle_usage, kup_ratio, vat_ratio, raw_facts_json, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            doc_id,
+                            lp,
+                            kp.entry_date.isoformat(),
+                            kp.doc_number,
+                            kp.counterparty_name,
+                            kp.description,
+                            float(kp.col_7_przychody),
+                            float(kp.col_8_pozostale_przychody),
+                            float(kp.col_9_razem_przychody),
+                            float(kp.col_10_zakup_towarow),
+                            float(kp.col_11_koszty_uboczne),
+                            float(kp.col_12_wynagrodzenia),
+                            float(kp.col_13_pozostale_wydatki),
+                            float(kp.col_14_razem_wydatki),
+                            float(kp.vat_amount),
+                            vehicle_usage,
+                            kup_ratio,
+                            vat_ratio,
+                            json.dumps(facts_dict),
+                            datetime.now(timezone.utc).isoformat()
+                        )
                     )
-                )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO kpir_quarantine (
+                            document_id, lp, entry_date, doc_number, counterparty_name, description,
+                            col_7_przychody, col_8_pozostale_przych, col_9_razem_przychody,
+                            col_10_zakup_towarow, col_11_koszty_uboczne, col_12_wynagrodzenia,
+                            col_13_pozostale_wyd, col_14_razem_wydatki, vat_amount,
+                            vehicle_usage, kup_ratio, vat_ratio, raw_facts_json,
+                            escalation_reason, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            doc_id,
+                            None,
+                            kp.entry_date.isoformat(),
+                            kp.doc_number,
+                            kp.counterparty_name,
+                            kp.description,
+                            float(kp.col_7_przychody),
+                            float(kp.col_8_pozostale_przychody),
+                            float(kp.col_9_razem_przychody),
+                            float(kp.col_10_zakup_towarow),
+                            float(kp.col_11_koszty_uboczne),
+                            float(kp.col_12_wynagrodzenia),
+                            float(kp.col_13_pozostale_wydatki),
+                            float(kp.col_14_razem_wydatki),
+                            float(kp.vat_amount),
+                            vehicle_usage,
+                            kup_ratio,
+                            vat_ratio,
+                            json.dumps(facts_dict),
+                            state.escalation_reason or "Причина эскалации не указана",
+                            datetime.now(timezone.utc).isoformat()
+                        )
+                    )
 
-            if state.zus_obligations:
+            # ZUS/PIT — тоже только для подтверждённого документа. agent03 считает
+            # их ещё до шлюза (graph.py: agent03 -> условный переход), но цифры,
+            # основанные на непроверенном документе, не должны попадать в ленту,
+            # которую 0003 сделал append-only ради доверия к истории.
+            if completed and state.zus_obligations:
                 zus = state.zus_obligations
                 conn.execute(
                     """
@@ -339,7 +412,7 @@ class SegregatorService:
                     )
                 )
 
-            if state.tax_result:
+            if completed and state.tax_result:
                 tx = state.tax_result
                 conn.execute(
                     """
@@ -360,6 +433,26 @@ class SegregatorService:
                         float(tx.advance_to_pay),
                         1 if tx.threshold_exceeded else 0,
                         datetime.now(timezone.utc).isoformat()
+                    )
+                )
+
+            # Аудит — независимо от status. AuditEntry дописывался в семи узлах
+            # nodes.py и не сохранялся никуда; это единственное место, где у записи
+            # есть document_id, поэтому персист идёт здесь, одной транзакцией с
+            # остальным.
+            for entry in state.audit_trail:
+                conn.execute(
+                    """
+                    INSERT INTO audit_trail (document_id, node_name, action, details, confidence, ts)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        doc_id,
+                        entry.node_name,
+                        entry.action,
+                        entry.details,
+                        entry.confidence,
+                        entry.timestamp.isoformat(),
                     )
                 )
 
