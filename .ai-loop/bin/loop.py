@@ -23,9 +23,11 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -43,6 +45,55 @@ def _slug(text: str, limit: int = 32) -> str:
 def _run_id(idea: str) -> str:
     stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     return f"{stamp}-{_slug(idea)}"
+
+
+def diff_fingerprint(repo: str, staged: bool = False, rng: str | None = None) -> str | None:
+    """SHA-256 того самого диффа, который классифицировали.
+
+    Подпись человека обязана относиться к конкретному снимку. Без отпечатка
+    запись «vlad approved» не отличает дифф, который он читал, от того, что
+    оказался в дереве через минуту.
+
+    `.ai-loop/ledger.jsonl` исключён из вычисления пути. Он сам версионируется,
+    и каждый append дописывает в него строку — в том числе запись самой
+    классификации, которую fingerprint должен запечатлеть. Без исключения
+    любой gate делал бы собственный отпечаток протухшим в момент своего же
+    завершения: seq N добавляет строку N в ledger.jsonl, `git diff HEAD` эту
+    строку тут же видит, и следующий approve сравнивает уже другой дифф.
+    Журнал — это протокол проверки, а не часть проверяемого изменения.
+    """
+    exclude_ledger = f":(exclude){ledger.LEDGER_REL}"
+    if rng:
+        argv = ["git", "-C", os.path.abspath(repo), "diff", rng, "--", ".", exclude_ledger]
+    elif staged:
+        argv = ["git", "-C", os.path.abspath(repo), "diff", "--cached", "--", ".", exclude_ledger]
+    else:
+        argv = ["git", "-C", os.path.abspath(repo), "diff", "HEAD", "--", ".", exclude_ledger]
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    if done.returncode != 0:
+        return None
+    return "sha256:" + hashlib.sha256(done.stdout.encode("utf-8")).hexdigest()
+
+
+def _ledger_or_refuse(repo: str) -> dict | None:
+    """Ни одно решение не принимается на основе журнала, который не сошёлся.
+
+    До этой проверки `verify` вызывался ровно из `status` — то есть целостность
+    смотрели там, где она ни на что не влияет, и не смотрели там, где на её
+    основе принимали решение.
+    """
+    ok, problems = ledger.verify(repo)
+    if not ok:
+        return {"error": "ledger hash chain is broken; refusing to act on it",
+                "ledger_problems": problems}
+    ok, problems = ledger.verify_append_only(repo)
+    if not ok:
+        return {"error": "ledger disagrees with its committed version; refusing to act on it",
+                "ledger_problems": problems}
+    return None
 
 
 def scaffold(repo: str) -> list[str]:
@@ -114,6 +165,12 @@ def cmd_complete(args) -> int:
             "blocked_on": state.get("blocked_on"),
         }, ensure_ascii=False, indent=2))
         return classify_diff.EXIT_REQUIRE_HUMAN
+    if state.get("rejected"):
+        # Отказ раньше снимал блок ровно как одобрение, и фаза закрывалась после «нет».
+        return _refuse({
+            "error": "a gate was rejected; the phase does not complete over a rejection",
+            "rejected": state.get("rejected"),
+        })
     ledger.append(repo, {
         "run_id": args.run_id, "event": "phase_complete",
         "phase": args.phase, "actor": args.actor, "note": args.note,
@@ -125,6 +182,10 @@ def cmd_complete(args) -> int:
 
 def cmd_gate(args) -> int:
     repo = os.path.abspath(args.repo)
+
+    broken = _ledger_or_refuse(repo)
+    if broken:
+        return _refuse(broken)
 
     argv = ["--repo", repo, "--json", "--run-id", args.run_id]
     if args.phase:
@@ -162,6 +223,13 @@ def cmd_gate(args) -> int:
         "lines_changed": payload.get("lines_changed"),
         "source": payload.get("source"),
         "error": payload.get("error"),
+        # Отпечаток того самого диффа, который сейчас классифицирован. Решение
+        # человека будет сверено с ним: подпись действительна для снимка, а не
+        # для пути в файловой системе.
+        "diff_fingerprint": diff_fingerprint(
+            repo, staged=bool(args.staged), rng=args.range),
+        "diff_source": (f"range:{args.range}" if args.range
+                        else "staged" if args.staged else "worktree"),
     }
     ledger.append(repo, {k: v for k, v in record.items() if v not in (None, [], {})})
 
@@ -188,26 +256,103 @@ def cmd_gate(args) -> int:
     return code
 
 
+def _refuse(payload: dict) -> int:
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return classify_diff.EXIT_ERROR
+
+
 def _human_decision(args, decision: str) -> int:
     repo = os.path.abspath(args.repo)
-    if args.actor in ("agent", "", None):
-        print(json.dumps({
-            "error": "a human decision needs a human actor; --actor must not be 'agent'",
-        }, ensure_ascii=False, indent=2))
-        return classify_diff.EXIT_ERROR
+
+    # 1. Актор задаётся явным флагом. AI_LOOP_ACTOR годится агенту для его
+    #    собственных записей, но человеческое решение он подменять не должен:
+    #    переменная окружения — не подпись.
+    if not getattr(args, "actor_explicit", False):
+        return _refuse({"error": "a human decision needs an explicit --actor; "
+                                 "AI_LOOP_ACTOR from the environment is not a signature"})
+    actor = (args.actor or "").strip()
+    if not actor or actor.lower() == "agent":
+        return _refuse({"error": "a human decision needs a human actor; "
+                                 f"--actor {args.actor!r} is not one",
+                        "why": "сторона, предлагающая изменение, не может быть стороной, его принимающей"})
+
+    # 2. Целостность журнала — до всего остального.
+    broken = _ledger_or_refuse(repo)
+    if broken:
+        return _refuse(broken)
+
     state = ledger.derive_state(repo, args.run_id)
-    ledger.append(repo, {
+    if not state.get("exists"):
+        return _refuse({"error": f"run {args.run_id!r} does not exist in this ledger"})
+
+    # 3. Решать можно только то, что открыто.
+    open_gates = state.get("blocked_on") or []
+    if not open_gates:
+        return _refuse({
+            "error": "no open gate to decide on",
+            "run_id": args.run_id,
+            "phase": state.get("phase"),
+            "hint": "нечего одобрять: последняя классификация уже разрешена. "
+                    "Сначала `loop.py gate`, потом решение по нему.",
+        })
+
+    # 4. Какой именно гейт. Молчаливое «последний» и было тем, из-за чего одно
+    #    решение закрывало три.
+    if args.resolves is None:
+        if len(open_gates) > 1:
+            return _refuse({
+                "error": "several gates are open; name the one you decide with --resolves <seq>",
+                "open_gates": [{"seq": g["seq"], "risk": g["risk"], "paths": g["paths"]} for g in open_gates],
+            })
+        target = open_gates[0]
+    else:
+        target = next((g for g in open_gates if g["seq"] == args.resolves), None)
+        if target is None:
+            return _refuse({
+                "error": f"gate {args.resolves} is not open",
+                "open_gates": [g["seq"] for g in open_gates],
+            })
+
+    # 5. Дифф не должен был измениться с момента классификации. Иначе подпись
+    #    относится к тому, чего человек не видел.
+    recorded = target.get("diff_fingerprint")
+    signed = recorded
+    if recorded:
+        source = target.get("diff_source") or "worktree"
+        current = diff_fingerprint(
+            repo,
+            staged=(source == "staged"),
+            rng=(source.split(":", 1)[1] if source.startswith("range:") else None),
+        )
+        if current != recorded:
+            return _refuse({
+                "error": "the diff changed since it was classified; the fingerprint no longer matches",
+                "gate_seq": target["seq"],
+                "classified_fingerprint": recorded,
+                "current_fingerprint": current,
+                "hint": "переклассифицируй (`loop.py gate`) и решай по свежему диффу — "
+                        "подпись действительна только для того снимка, который был показан",
+            })
+        signed = current
+
+    record = {
         "run_id": args.run_id,
         "event": "human_decision",
         "phase": state.get("phase"),
-        "actor": args.actor,
+        "actor": actor,
         "decision": decision,
         "note": args.note,
-        "resolves_seq": (state.get("blocked_on") or {}).get("seq"),
-    })
+        "resolves_seq": target["seq"],
+    }
+    if signed:
+        record["diff_fingerprint"] = signed
+    ledger.append(repo, record)
+
     print(json.dumps({
-        "run_id": args.run_id, "decision": decision, "actor": args.actor,
-        "resolved": (state.get("blocked_on") or {}).get("seq"),
+        "run_id": args.run_id, "decision": decision, "actor": actor,
+        "resolved": target["seq"],
+        "diff_fingerprint": signed,
+        "still_open": [g["seq"] for g in open_gates if g["seq"] != target["seq"]],
     }, ensure_ascii=False, indent=2))
     return 0
 
@@ -233,6 +378,9 @@ def cmd_finish(args) -> int:
         print(json.dumps({"error": "cannot finish a run that is blocked on a human decision",
                           "blocked_on": state.get("blocked_on")}, ensure_ascii=False, indent=2))
         return classify_diff.EXIT_REQUIRE_HUMAN
+    if state.get("rejected"):
+        return _refuse({"error": "cannot finish a run that has a rejected gate",
+                        "rejected": state.get("rejected")})
     ledger.append(repo, {
         "run_id": args.run_id, "event": "run_complete", "phase": "DONE",
         "actor": args.actor, "note": args.note, "commit": args.commit,
@@ -285,11 +433,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     approve = with_actor(sub.add_parser("approve"))
     approve.add_argument("--run-id", required=True)
+    approve.add_argument("--resolves", type=int,
+                         help="seq классификации, которую решает эта подпись")
     approve.add_argument("--note")
     approve.set_defaults(func=lambda a: _human_decision(a, "approved"))
 
     reject = with_actor(sub.add_parser("reject"))
     reject.add_argument("--run-id", required=True)
+    reject.add_argument("--resolves", type=int,
+                        help="seq классификации, которую решает эта подпись")
     reject.add_argument("--note")
     reject.set_defaults(func=lambda a: _human_decision(a, "rejected"))
 
@@ -312,6 +464,9 @@ def main(argv: list[str] | None = None) -> int:
     # Subcommand --actor wins over the global one; fall back to the environment,
     # then to "agent" -- which human_decision explicitly refuses.
     sub_actor = getattr(args, "actor", None)
+    # Явно ли актор назван флагом. Человеческое решение принимает только флаг:
+    # AI_LOOP_ACTOR в окружении позволял одобрить вообще без него.
+    args.actor_explicit = sub_actor is not None
     args.actor = sub_actor or os.environ.get("AI_LOOP_ACTOR") or "agent"
     return args.func(args)
 

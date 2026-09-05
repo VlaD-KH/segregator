@@ -27,10 +27,12 @@ import datetime as _dt
 import hashlib
 import json
 import os
+import subprocess
 import sys
 
 SCHEMA = "ai-loop/ledger/v1"
 GENESIS = "0" * 64
+LEDGER_REL = ".ai-loop/ledger.jsonl"
 
 PHASES = ["INTAKE", "GROUND", "CONTROL", "DEFINE", "PLAN", "BUILD", "VERIFY", "REVIEW", "SHIP", "DONE"]
 
@@ -101,6 +103,60 @@ def verify(repo: str) -> tuple[bool, list[str]]:
     return (not problems), problems
 
 
+def _committed_ledger(repo: str) -> list[str] | None:
+    """Содержимое журнала из последнего коммита, построчно. None — не с чем сверять."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", os.path.abspath(repo), "show", f"HEAD:{LEDGER_REL}"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+    except OSError:
+        return None
+    if done.returncode != 0:
+        return None
+    return [line.rstrip() for line in done.stdout.splitlines() if line.strip()]
+
+
+def verify_append_only(repo: str) -> tuple[bool, list[str]]:
+    """Сверка журнала с git: закоммиченное обязано остаться неизменным префиксом.
+
+    Хеш-цепочка сама по себе ничего не доказывает: она не имеет ключа, `_digest`
+    детерминирован, и тот, кто может писать в файл, пересчитывает её целиком за
+    десять строк — `verify` при этом возвращает ok. Проверено на копии
+    настоящего журнала: подменённое решение человека и обрезанный хвост
+    проходили обе проверки.
+
+    Якорь берётся снаружи цикла — из git, куда журнал коммитится и уезжает на
+    origin. Чтобы подделка прошла и здесь, придётся переписать историю git,
+    а это уже видно всем, у кого есть клон.
+    """
+    committed = _committed_ledger(repo)
+    if committed is None:
+        # Журнал ещё ни разу не коммитился или это не git-репозиторий —
+        # сверять не с чем. Это не нарушение, но и не доказательство.
+        return True, []
+
+    current = [line.rstrip() for line in
+               (open(ledger_path(repo), encoding="utf-8").read().splitlines()
+                if os.path.isfile(ledger_path(repo)) else [])
+               if line.strip()]
+
+    problems: list[str] = []
+    if len(current) < len(committed):
+        problems.append(
+            f"ledger is shorter than its committed version: {len(current)} records now, "
+            f"{len(committed)} committed — закоммиченный хвост обрезан"
+        )
+    for index, (was, now) in enumerate(zip(committed, current), start=1):
+        if was != now:
+            problems.append(
+                f"record {index}: committed version differs from the current file — "
+                f"закоммиченная запись переписана"
+            )
+            break
+    return (not problems), problems
+
+
 def derive_state(repo: str, run_id: str) -> dict:
     """The run's state is derived from the ledger, never stored separately.
 
@@ -112,8 +168,13 @@ def derive_state(repo: str, run_id: str) -> dict:
         return {"run_id": run_id, "exists": False}
 
     phase = "INTAKE"
-    blocked_on: dict | None = None
+    # Открытые гейты — очередь, а не одна переменная. Пока здесь стоял один слот,
+    # каждая новая блокирующая классификация затирала предыдущую, и ОДНО решение
+    # человека закрывало все накопленные разом. Проверено: три подряд выданных
+    # гейта снимались одним approve.
+    open_gates: dict[int, dict] = {}
     approvals: list[dict] = []
+    rejected: list[dict] = []
     idea = None
     for record in records:
         event = record.get("event")
@@ -122,18 +183,34 @@ def derive_state(repo: str, run_id: str) -> dict:
         if event == "run_start":
             idea = record.get("idea")
         if event in ("classification", "gate") and record.get("decision") == "require_human":
-            blocked_on = {
+            open_gates[record.get("seq")] = {
                 "seq": record.get("seq"), "phase": record.get("phase"),
                 "risk": record.get("risk"), "note": record.get("note"),
                 "paths": record.get("paths"),
+                "diff_fingerprint": record.get("diff_fingerprint"),
+                "diff_source": record.get("diff_source"),
             }
         if event == "human_decision":
+            decision = record.get("decision")
+            target = record.get("resolves_seq")
             approvals.append({
                 "seq": record.get("seq"), "actor": record.get("actor"),
-                "decision": record.get("decision"), "note": record.get("note"),
+                "decision": decision, "note": record.get("note"),
+                "resolves_seq": target,
             })
-            if record.get("decision") in ("approved", "rejected"):
-                blocked_on = None
+            if target is None:
+                # Записи, сделанные до появления очереди, не называли гейт.
+                # Толковать их иначе, чем толковал их тогда инструмент, значит
+                # переписывать смысл истории задним числом — поэтому старое
+                # решение закрывает всё, что было открыто на тот момент.
+                open_gates.clear()
+            else:
+                open_gates.pop(target, None)
+            if decision == "rejected":
+                rejected.append({
+                    "seq": record.get("seq"), "resolves_seq": target,
+                    "actor": record.get("actor"), "note": record.get("note"),
+                })
         if event == "run_complete":
             phase = "DONE"
 
@@ -142,8 +219,11 @@ def derive_state(repo: str, run_id: str) -> dict:
         "exists": True,
         "idea": idea,
         "phase": phase,
-        "blocked": blocked_on is not None,
-        "blocked_on": blocked_on,
+        "blocked": bool(open_gates),
+        "blocked_on": list(open_gates.values()),
+        # Отказ — не «разблокировано». Пока он в силе, фаза не закрывается и
+        # прогон не завершается: раньше reject снимал блок ровно как approve.
+        "rejected": rejected,
         "approvals": approvals,
         "records": len(records),
         "last_ts": records[-1].get("ts"),
