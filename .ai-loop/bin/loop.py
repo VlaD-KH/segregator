@@ -314,10 +314,15 @@ def _human_decision(args, decision: str) -> int:
             })
 
     # 5. Дифф не должен был измениться с момента классификации. Иначе подпись
-    #    относится к тому, чего человек не видел.
+    #    относится к тому, чего человек не видел. Исключение — `--stale`:
+    #    закрытие записи, для которой содержание уже необратимо недоступно
+    #    (следующая правка того же файла успела закоммититься и обзавестись
+    #    собственной, уже принятой классификацией). Это не «я посмотрел этот
+    #    дифф», а «эта запись — мёртвая бухгалтерия, и я это знаю» — потому
+    #    ledger хранит их по-разному, и оба пути видны в show/status раздельно.
     recorded = target.get("diff_fingerprint")
     signed = recorded
-    if recorded:
+    if recorded and not args.stale:
         source = target.get("diff_source") or "worktree"
         current = diff_fingerprint(
             repo,
@@ -331,9 +336,15 @@ def _human_decision(args, decision: str) -> int:
                 "classified_fingerprint": recorded,
                 "current_fingerprint": current,
                 "hint": "переклассифицируй (`loop.py gate`) и решай по свежему диффу — "
-                        "подпись действительна только для того снимка, который был показан",
+                        "подпись действительна только для того снимка, который был показан. "
+                        "Если снимок безвозвратно недоступен (правка уже закоммичена под другой "
+                        "классификацией) и запись закрывается как мёртвая бухгалтерия, а не как "
+                        "разбор содержимого — добавь --stale.",
             })
         signed = current
+    elif args.stale and not args.note:
+        return _refuse({"error": "--stale closes a record without reviewing its content; "
+                                 "--note must say why that is acceptable"})
 
     record = {
         "run_id": args.run_id,
@@ -344,14 +355,19 @@ def _human_decision(args, decision: str) -> int:
         "note": args.note,
         "resolves_seq": target["seq"],
     }
-    if signed:
+    if args.stale:
+        record["stale_closure"] = True
+    elif signed:
         record["diff_fingerprint"] = signed
     ledger.append(repo, record)
 
     print(json.dumps({
         "run_id": args.run_id, "decision": decision, "actor": actor,
         "resolved": target["seq"],
-        "diff_fingerprint": signed,
+        # Не signed вслепую: при --stale отпечаток не сверялся, и печать здесь
+        # не должна намекать на обратное — то же, за что этот флаг и ловил ложь.
+        "diff_fingerprint": None if args.stale else signed,
+        "stale_closure": bool(args.stale),
         "still_open": [g["seq"] for g in open_gates if g["seq"] != target["seq"]],
     }, ensure_ascii=False, indent=2))
     return 0
@@ -435,6 +451,9 @@ def build_parser() -> argparse.ArgumentParser:
     approve.add_argument("--run-id", required=True)
     approve.add_argument("--resolves", type=int,
                          help="seq классификации, которую решает эта подпись")
+    approve.add_argument("--stale", action="store_true",
+                         help="закрыть запись без сверки диффа — как мёртвую бухгалтерию, "
+                              "не как одобрение содержимого; требует --note")
     approve.add_argument("--note")
     approve.set_defaults(func=lambda a: _human_decision(a, "approved"))
 
@@ -442,6 +461,9 @@ def build_parser() -> argparse.ArgumentParser:
     reject.add_argument("--run-id", required=True)
     reject.add_argument("--resolves", type=int,
                         help="seq классификации, которую решает эта подпись")
+    reject.add_argument("--stale", action="store_true",
+                        help="закрыть запись без сверки диффа — как мёртвую бухгалтерию, "
+                             "не как решение по содержимому; требует --note")
     reject.add_argument("--note")
     reject.set_defaults(func=lambda a: _human_decision(a, "rejected"))
 

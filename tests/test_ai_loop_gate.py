@@ -366,6 +366,74 @@ def test_gate_stores_a_diff_fingerprint(repo):
     assert classifications[-1].get("diff_fingerprint"), "классификация обязана назвать отпечаток диффа"
 
 
+# --- --stale: закрытие мёртвой бухгалтерии, а не решение по содержимому -------
+
+
+def test_stale_closure_output_does_not_print_an_unverified_fingerprint(repo, capsys):
+    """Печать не должна намекать на сверку, которой не было — ровно то, что
+    сама эта запись существует, чтобы отличать от настоящего approve."""
+    (repo / "src").mkdir()
+    (repo / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-N", "src/a.py"], cwd=repo, check=True)
+    gate = _gate_record(repo, "R1", "гейт", diff_fingerprint=loop.diff_fingerprint(str(repo), staged=False))
+    (repo / "src" / "a.py").write_text("x = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "later fix"], cwd=repo, check=True)
+
+    _run(repo, "approve", "--run-id", "R1", "--resolves", str(gate["seq"]),
+         "--actor", "vlad", "--stale", "--note", "снимок недоступен")
+
+    printed = json.loads(capsys.readouterr().out)
+    assert printed["diff_fingerprint"] is None
+    assert printed["stale_closure"] is True
+
+
+def test_stale_closure_bypasses_the_fingerprint_check(repo):
+    """Ровно случай, который вскрылся на практике: следующая правка того же
+    файла успела закоммититься и получить собственную классификацию — снимок
+    первой записи безвозвратно недоступен, решать по содержимому уже нечего."""
+    (repo / "src").mkdir()
+    (repo / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-N", "src/a.py"], cwd=repo, check=True)
+    gate = _gate_record(repo, "R1", "гейт", diff_fingerprint=loop.diff_fingerprint(str(repo), staged=False))
+
+    (repo / "src" / "a.py").write_text("x = 2\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "later fix"], cwd=repo, check=True)
+
+    assert _run(repo, "approve", "--run-id", "R1", "--resolves", str(gate["seq"]),
+                "--actor", "vlad", "--stale",
+                "--note", "снимок недоступен, закрыто вместе с изменившим его коммитом") == 0
+
+    last = ledger.read_records(str(repo))[-1]
+    assert last["stale_closure"] is True
+    assert "diff_fingerprint" not in last, "закрытие без сверки не должно притворяться сверенным"
+
+
+def test_stale_closure_requires_a_note(repo):
+    (repo / "src").mkdir()
+    (repo / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-N", "src/a.py"], cwd=repo, check=True)
+    gate = _gate_record(repo, "R1", "гейт", diff_fingerprint=loop.diff_fingerprint(str(repo), staged=False))
+
+    code = _run(repo, "approve", "--run-id", "R1", "--resolves", str(gate["seq"]),
+                "--actor", "vlad", "--stale")
+    assert code != 0, "закрытие без ревью содержимого обязано объяснить себя"
+
+
+def test_non_stale_approve_still_refused_when_diff_moved(repo):
+    """--stale не должен становиться обходом по умолчанию."""
+    (repo / "src").mkdir()
+    (repo / "src" / "a.py").write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-N", "src/a.py"], cwd=repo, check=True)
+    gate = _gate_record(repo, "R1", "гейт", diff_fingerprint=loop.diff_fingerprint(str(repo), staged=False))
+
+    (repo / "src" / "a.py").write_text("x = 2\n", encoding="utf-8")
+
+    assert _run(repo, "approve", "--run-id", "R1", "--resolves", str(gate["seq"]),
+                "--actor", "vlad", "--note", "ok") != 0
+
+
 # --- 6. Актор человека задаётся явно -------------------------------------------
 
 
