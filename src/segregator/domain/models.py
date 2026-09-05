@@ -104,78 +104,20 @@ def _normalise_disclaimer(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip().casefold()
 
 
-def mask_iban(iban: Optional[str]) -> Optional[str]:
-    """Маскирование IBAN для соблюдения RODO/DATA_BOUNDARY."""
-    if not iban:
-        return None
-    cleaned = re.sub(r"\s+", "", iban)
-    if len(cleaned) < 8:
-        return "****"
-    return f"{cleaned[:2]}**...{cleaned[-4:]}"
-
-
-# Имена полей, значения которых не имеют права лечь в БД открытым текстом
-# (docs/DATA_BOUNDARY.md, инвариант 3). Ключ «iban» — лишь один из способов
-# назвать счёт: реальные извлечения дают numer_konta / nr_konta / rachunek,
-# и точечное совпадение по строке "iban" их не ловило.
-# Польские имена полей склоняются, и точный литерал ловит только один падеж:
-# `rachunek` не совпадает с `numer_rachunku` — а это САМОЕ частое название
-# банковского счёта на фактуре. Поэтому основы, а не полные слова.
-#   kont[oa]  — konto, numer_konta; но не kontrahent (там `kontr`)
-#   rachun    — rachunek, numer_rachunku, rachunek_bankowy_sprzedawcy
-#   kart[ayęi]— karta, numer_karty, kartę; но не kartoteka/kartka (там `karto`/`kartk`)
-# Перекос сознательно в сторону лишней маски: не замаскировать счёт дороже,
-# чем замаскировать поле, которое счётом не было.
-# `kont[oa](?!kt)` — иначе основа съедала `kontakt`, `dane_kontaktowe`,
-# `kontakt_email`, и адрес почты переписывался в фальшивый IBAN.
-# `dowod` и `kart` как основы: `dowod_osobistego`, `nr_dowodu`, `kartą` —
-# те же падежи, ради которых основы и вводились.
-_ACCOUNT_FIELD_RE = re.compile(r"iban|kont[oa](?!kt)|rachun|account|swift|bic", re.IGNORECASE)
-_IDENTITY_FIELD_RE = re.compile(r"pesel|card_?number|kart[ayęąi]|dowod", re.IGNORECASE)
-
-# NIP сознательно не маскируется: это открытый идентификатор предприятия,
-# инвариант 3 перечисляет PESEL, IBAN и номера карт.
-
-
-def is_sensitive_field_name(name: str) -> bool:
-    """Нужно ли маскировать значение поля с таким именем."""
-    return bool(_ACCOUNT_FIELD_RE.search(name) or _IDENTITY_FIELD_RE.search(name))
-
-
-def mask_sensitive_fields(facts_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Замаскировать чувствительные поля в сериализованных фактах (на месте).
-
-    Вызывается перед любой записью фактов в БД. Проверка идёт по ИМЕНИ поля,
-    а не по одному захардкоженному ключу.
-
-    NB: `logging.py` держит собственный набор SENSITIVE_KEYS с тем же изъяном
-    (точное совпадение по «iban»), но это зона R — сведение двух списков в один
-    делается отдельным заходом с одобрения владельца.
-    """
-    fields = facts_dict.get("fields")
-    if not isinstance(fields, dict):
-        return facts_dict
-    for name, field in fields.items():
-        if not isinstance(field, dict) or not is_sensitive_field_name(name):
-            continue
-        value = field.get("value")
-        if value is None:
-            continue
-        # Схема держит `value` скалярным (string|number|null), и рекурсивный
-        # обход здесь был бы защитой от формы, которую контракт запрещает.
-        # Но если контракт когда-нибудь изменится, молча пропустить составное
-        # значение мимо маски нельзя — падаем громко.
-        if isinstance(value, (dict, list)):
-            raise TypeError(
-                f"Поле «{name}» чувствительное, но значение составное "
-                f"({type(value).__name__}). Схема document_facts.json допускает "
-                f"только string|number|null; маскирование составных значений "
-                f"не реализовано — реализуйте его прежде, чем менять схему."
-            )
-        field["value"] = (
-            mask_iban(str(value)) if _ACCOUNT_FIELD_RE.search(name) else "****"
-        )
-    return facts_dict
+# Маскирование переехало в `domain/masking.py`: оно зонируется как R, и туда
+# должен уезжать один файл, а не весь модуль моделей. Имена оставлены здесь
+# импортом — на них ссылаются service.py, probe/ и тесты.
+#
+# NB: `logging.py` держит собственный набор SENSITIVE_KEYS с тем же изъяном
+# (точное совпадение по «iban»), но это зона R — сведение двух списков в один
+# делается отдельным заходом с одобрения владельца.
+from segregator.domain.masking import (  # noqa: F401  (реэкспорт)
+    is_sensitive_field_name,
+    mask_iban,
+    mask_ibans_in_text,
+    mask_sensitive_fields,
+    validate_iban_mod97,
+)
 
 
 # =========================================================================

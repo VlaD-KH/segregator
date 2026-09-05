@@ -8,7 +8,16 @@ Validates:
 """
 
 from __future__ import annotations
+import sys
 import xml.etree.ElementTree as ET
+from pathlib import Path
+
+# src/ этого рабочего дерева — явно и первым. Глобальный editable-install
+# указывает на дерево `main`, и без этой строки probe считал бы маску оттуда,
+# то есть не ту, которую проверяет владелец в своей ветке.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from segregator.domain.masking import mask_iban, validate_iban_mod97  # noqa: E402
 
 
 def generate_mikrorachunek(id_type: str, id_val: str) -> str:
@@ -32,19 +41,6 @@ def generate_mikrorachunek(id_type: str, id_val: str) -> str:
     remainder = int(check_str) % 97
     checksum = 98 - remainder
     return f"{checksum:02d}{bban}"
-
-
-def validate_iban_mod97(iban: str) -> bool:
-    """Validate full Polish IBAN (PL + 26 digits) according to ISO 7064 Modulo 97-10."""
-    clean = iban.replace(" ", "").upper()
-    if clean.startswith("PL"):
-        clean = clean[2:]
-    if len(clean) != 26 or not clean.isdigit():
-        return False
-    lk = clean[:2]
-    bban = clean[2:]
-    test_str = bban + "2521" + lk
-    return int(test_str) % 97 == 1
 
 
 def get_zus_nrs_account(nip: str) -> str:
@@ -88,7 +84,11 @@ def verify_ksef_fa3_xml(xml_content: str) -> dict:
         "vat_23": float(vat_23) if vat_23 else 0.0,
         "gross": float(gross) if gross else 0.0,
         "mpp": mpp_flag == "1",
-        "iban": iban
+        # Замаскирован здесь, а не у вызывающего: main() печатает весь словарь,
+        # а выхлоп probe/ читает человек и пересылает ассистенту. XML в этом
+        # файле синтетический, но первый прогон на настоящем KSeF-XML напечатал
+        # бы счёт продавца целиком (DATA_BOUNDARY.md, инвариант 3).
+        "iban_masked": mask_iban(iban),
     }
 
 
