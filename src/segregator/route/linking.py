@@ -25,10 +25,10 @@ def link_or_copy(src: Path, dst: Path) -> str:
     dst_path = Path(dst)
 
     if not src_path.exists():
-        raise FileNotFoundError(f"Исходный файл не найден: {src_path}")
+        raise FileNotFoundError("Исходный файл не найден")
 
     if dst_path.exists():
-        raise FileExistsError(f"Файл назначения уже существует: {dst_path}")
+        raise FileExistsError("Файл назначения уже существует")
 
     dst_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -63,10 +63,10 @@ def relink(old: Path, new: Path) -> None:
     new_path = Path(new)
 
     if not old_path.exists():
-        raise FileNotFoundError(f"Исходная ссылка не найдена: {old_path}")
+        raise FileNotFoundError("Исходная ссылка не найдена")
 
     if new_path.exists():
-        raise FileExistsError(f"Файл назначения уже существует: {new_path}")
+        raise FileExistsError("Файл назначения уже существует")
 
     new_path.parent.mkdir(parents=True, exist_ok=True)
     link_or_copy(old_path, new_path)

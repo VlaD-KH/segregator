@@ -78,6 +78,4 @@ def unique_path(target: Path, *, limit: int = 999) -> Path:
         if not candidate.exists():
             return candidate
 
-    raise FileExistsError(
-        f"Не удалось подобрать свободное имя файла за {limit} попыток для {target}"
-    )
+    raise FileExistsError("Не удалось подобрать свободное имя файла: исчерпан лимит попыток")

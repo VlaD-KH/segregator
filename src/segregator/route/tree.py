@@ -34,7 +34,7 @@ def month_folder(month: int) -> str:
     Вне диапазона 1..12 поднимает ValueError.
     """
     if month not in _MONTH_NAMES:
-        raise ValueError(f"Недопустимый номер месяца: {month}. Ожидается от 1 до 12.")
+        raise ValueError("Недопустимый номер месяца: ожидается от 1 до 12")
     return _MONTH_NAMES[month]
 
 
