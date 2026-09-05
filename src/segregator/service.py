@@ -11,6 +11,7 @@ import hashlib
 import json
 import shutil
 import sqlite3
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -32,7 +33,18 @@ from segregator.orchestrator.state import AccountingGraphState
 from segregator.orchestrator.graph import build_accounting_graph
 from segregator.db.migrate import get_connection, migrate
 from segregator.ingest.blobs import store_blob as ingest_store_blob, blob_relative_path
-from segregator.accounting.period import next_lp
+from segregator.accounting.period import PeriodTotals, close_month, next_lp
+from segregator.domain.models import ZUSObligations
+from segregator.domain.zus import ZUSCalculator
+from segregator.tax.pit import MonthlyTaxResult, PITCalculator
+
+
+@dataclass(frozen=True)
+class PeriodClosing:
+    """Итог закрытия месяца: агрегат книги и посчитанные от него обязательства."""
+    totals: PeriodTotals
+    zus: ZUSObligations
+    tax: MonthlyTaxResult
 
 
 class MonthNames:
@@ -186,12 +198,23 @@ class SegregatorService:
         sync_state = self.get_sync_state(profile.nip)
         
         target_doc_date = custom_facts.doc_date if (custom_facts and custom_facts.doc_date) else date.today()
+
+        # Выручка года по уже проведённым документам. Узлы графа не видят БД,
+        # поэтому цифру вкладывает сервис: без неё agent03 подставлял заглушку,
+        # а на ryczałcie вовсе отказывался считать.
+        conn = get_connection(self.db_path)
+        try:
+            ytd_przychody, _ = self._ytd_from_ledger(conn, target_doc_date.year, target_doc_date.month)
+        finally:
+            conn.close()
+
         initial_state = AccountingGraphState(
             raw_input=sha,
             target_date=target_doc_date,
             taxpayer_profile=profile,
             sync_state=sync_state,
-            facts=custom_facts
+            facts=custom_facts,
+            ytd_przychody=ytd_przychody,
         )
 
         final_state = self.graph.invoke(initial_state)
@@ -383,58 +406,10 @@ class SegregatorService:
             # основанные на непроверенном документе, не должны попадать в ленту,
             # которую 0003 сделал append-only ради доверия к истории.
             if completed and state.zus_obligations:
-                zus = state.zus_obligations
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO zus_declarations (
-                        taxpayer_nip, period_month, stage, zbieg_tytulow, spoleczne_base, zdrowotna_base,
-                        emerytalne, rentowe, chorobowe, wypadkowe, fundusz_pracy, skladka_zdrowotna,
-                        total_spoleczne, total_do_zaplaty, forms_json, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        profile.nip,
-                        zus.month,
-                        zus.stage.value,
-                        1 if zus.zbieg_tytulow else 0,
-                        float(zus.spoleczne_base),
-                        float(zus.zdrowotna_base),
-                        float(zus.emerytalne),
-                        float(zus.rentowe),
-                        float(zus.chorobowe),
-                        float(zus.wypadkowe),
-                        float(zus.fundusz_pracy),
-                        float(zus.skladka_zdrowotna),
-                        float(zus.total_spoleczne),
-                        float(zus.total_zus_do_zaplaty),
-                        json.dumps(zus.forms_required),
-                        datetime.now(timezone.utc).isoformat()
-                    )
-                )
+                self._write_zus(conn, profile.nip, state.zus_obligations)
 
             if completed and state.tax_result:
-                tx = state.tax_result
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO tax_advances (
-                        taxpayer_nip, period_month, regime, income_ytd, costs_ytd, tax_base_ytd,
-                        tax_due_ytd, advances_paid_prior, advance_to_pay, threshold_exceeded, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        profile.nip,
-                        tx.month,
-                        tx.regime.value,
-                        float(tx.income_ytd),
-                        float(tx.costs_ytd),
-                        float(tx.tax_base_ytd),
-                        float(tx.tax_due_ytd),
-                        float(tx.advances_paid_prior),
-                        float(tx.advance_to_pay),
-                        1 if tx.threshold_exceeded else 0,
-                        datetime.now(timezone.utc).isoformat()
-                    )
-                )
+                self._write_tax_advance(conn, profile.nip, state.tax_result)
 
             # Аудит — независимо от status. AuditEntry дописывался в семи узлах
             # nodes.py и не сохранялся никуда; это единственное место, где у записи
@@ -459,6 +434,174 @@ class SegregatorService:
             conn.commit()
         finally:
             conn.close()
+
+    # --- append-only запись помесячных обязательств ------------------------------
+    #
+    # Раньше здесь стоял INSERT OR REPLACE под UNIQUE (taxpayer_nip, period_month).
+    # Миграция 0003 сняла это ограничение и заменила частичным индексом по
+    # superseded_at IS NULL — под ним OR REPLACE не заменяет строку, а УДАЛЯЕТ
+    # прошлую вместе с её created_at. Инвариант 5 DATA_BOUNDARY.md требует
+    # append-only, поэтому прежняя строка закрывается, а не исчезает.
+
+    def _write_zus(self, conn: sqlite3.Connection, nip: str, zus: ZUSObligations) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            UPDATE zus_declarations SET superseded_at = ?
+            WHERE taxpayer_nip = ? AND period_month = ? AND superseded_at IS NULL
+            """,
+            (now, nip, zus.month),
+        )
+        conn.execute(
+            """
+            INSERT INTO zus_declarations (
+                taxpayer_nip, period_month, stage, zbieg_tytulow, spoleczne_base, zdrowotna_base,
+                emerytalne, rentowe, chorobowe, wypadkowe, fundusz_pracy, skladka_zdrowotna,
+                total_spoleczne, total_do_zaplaty, forms_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                nip,
+                zus.month,
+                zus.stage.value,
+                1 if zus.zbieg_tytulow else 0,
+                float(zus.spoleczne_base),
+                float(zus.zdrowotna_base),
+                float(zus.emerytalne),
+                float(zus.rentowe),
+                float(zus.chorobowe),
+                float(zus.wypadkowe),
+                float(zus.fundusz_pracy),
+                float(zus.skladka_zdrowotna),
+                float(zus.total_spoleczne),
+                float(zus.total_zus_do_zaplaty),
+                json.dumps(zus.forms_required),
+                now,
+            ),
+        )
+
+    def _write_tax_advance(self, conn: sqlite3.Connection, nip: str, tx: MonthlyTaxResult) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """
+            UPDATE tax_advances SET superseded_at = ?
+            WHERE taxpayer_nip = ? AND period_month = ? AND superseded_at IS NULL
+            """,
+            (now, nip, tx.month),
+        )
+        conn.execute(
+            """
+            INSERT INTO tax_advances (
+                taxpayer_nip, period_month, regime, income_ytd, costs_ytd, tax_base_ytd,
+                tax_due_ytd, advances_paid_prior, advance_to_pay, threshold_exceeded, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                nip,
+                tx.month,
+                tx.regime.value,
+                float(tx.income_ytd),
+                float(tx.costs_ytd),
+                float(tx.tax_base_ytd),
+                float(tx.tax_due_ytd),
+                float(tx.advances_paid_prior),
+                float(tx.advance_to_pay),
+                1 if tx.threshold_exceeded else 0,
+                now,
+            ),
+        )
+
+    # --- закрытие месяца ---------------------------------------------------------
+
+    @staticmethod
+    def _ytd_from_ledger(conn: sqlite3.Connection, year: int, up_to_month: int) -> tuple[Decimal, Decimal]:
+        """Выручка и расходы с начала года по конец `up_to_month`, из проводок.
+
+        Месяц без проводок даёт ноль, а не отказ: JDG, открытая в середине года,
+        законно не имеет книги за январь. Отказ считать относится только к
+        закрываемому периоду и проверяется в close_period отдельно.
+        """
+        przychody = Decimal("0.00")
+        koszty = Decimal("0.00")
+        for month in range(1, up_to_month + 1):
+            try:
+                totals = close_month(conn, f"{year}-{month:02d}")
+            except ValueError:
+                continue
+            przychody += totals.przychody
+            koszty += totals.koszty
+        return przychody, koszty
+
+    def close_period(self, profile: TaxpayerProfile, period: str) -> PeriodClosing:
+        """Официальный расчёт месяца: агрегаты из книги, ZUS и PIT от них.
+
+        Отдельный шаг после проводки всех документов периода. Оценка, которую
+        agent03 делает по одному документу, знает только текущую бумагу —
+        здесь считается по всей книге, и результат закрывает эту оценку.
+
+        Месяц без проводок — ValueError, а не нули: отсутствие данных и нулевой
+        доход разные вещи, вторая молча отдала бы декларацию за необработанный
+        месяц.
+        """
+        year, month = int(period[:4]), int(period[5:7])
+        conn = get_connection(self.db_path)
+        try:
+            # Отказ считать пустой период приходит отсюда — close_month падает сам.
+            totals = close_month(conn, period)
+
+            ytd_przychody, ytd_koszty = self._ytd_from_ledger(conn, year, month)
+
+            regime = profile.jdg_tax_regime or TaxRegime.SKALA
+            zus = ZUSCalculator.calculate_monthly_obligations(
+                profile=profile,
+                target_month=date(year, month, 1),
+                jdg_monthly_profit=totals.dochod,
+                annual_revenue=ytd_przychody,
+            )
+
+            # Кумулятивные взносы — из истории закрытых месяцев плюс текущий.
+            # Берутся только действующие строки: пересчитанный месяц не должен
+            # считаться дважды.
+            prior_spoleczne, prior_zdrowotna = conn.execute(
+                """
+                SELECT COALESCE(SUM(total_spoleczne), 0), COALESCE(SUM(skladka_zdrowotna), 0)
+                FROM zus_declarations
+                WHERE taxpayer_nip = ? AND period_month < ? AND superseded_at IS NULL
+                """,
+                (profile.nip, period),
+            ).fetchone()
+
+            # Ранее уплаченные авансы — кумулятивный налог прошлого месяца.
+            # Аванс за месяц = налог нарастающим итогом минус уже уплаченное;
+            # раньше сюда не передавалось ничего, и аванс платился заново каждый месяц.
+            prior_row = conn.execute(
+                """
+                SELECT tax_due_ytd FROM tax_advances
+                WHERE taxpayer_nip = ? AND period_month < ? AND superseded_at IS NULL
+                ORDER BY period_month DESC LIMIT 1
+                """,
+                (profile.nip, period),
+            ).fetchone()
+            advances_paid_prior = Decimal(str(prior_row[0])) if prior_row else Decimal("0.00")
+
+            tax = PITCalculator.calculate_monthly_jdg_advance(
+                month=period,
+                regime=regime,
+                income_ytd=ytd_przychody,
+                costs_ytd=ytd_koszty,
+                social_zus_paid_ytd=Decimal(str(prior_spoleczne)) + zus.total_spoleczne,
+                health_zus_paid_ytd=Decimal(str(prior_zdrowotna)) + zus.skladka_zdrowotna,
+                advances_paid_prior=advances_paid_prior,
+                ryczalt_rate=profile.jdg_ryczalt_rate if regime == TaxRegime.RYCZALT else None,
+            )
+
+            self._write_zus(conn, profile.nip, zus)
+            self._write_tax_advance(conn, profile.nip, tax)
+            conn.commit()
+        finally:
+            conn.close()
+
+        return PeriodClosing(totals=totals, zus=zus, tax=tax)
 
     def _route_to_archive(self, src_file: Path, state: AccountingGraphState):
         """

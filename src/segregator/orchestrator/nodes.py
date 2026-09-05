@@ -205,16 +205,24 @@ def agent03_tax_node(state: AccountingGraphState) -> AccountingGraphState:
 
     # 1. Расчет ZUS (если есть профиль с периодом JDG)
     if profile and any(p.emp_type == EmploymentTypeKind.JDG for p in profile.employment_history):
-        # Оценка прибыли за месяц по KPiR
-        monthly_profit = Decimal('10000.00')
-        if state.kpir_entry:
-            if state.kpir_entry.col_7_przychody > Decimal('0.00'):
-                monthly_profit = state.kpir_entry.col_7_przychody
-        
+        # Предварительная оценка по одному документу: узел не видит БД, поэтому
+        # знает только текущую проводку плюс выручку года, вложенную сервисом.
+        # Захардкоженных 10 000 zł здесь больше нет — цифра, взятая из воздуха,
+        # уезжала в декларацию. Окончательный расчёт делает
+        # SegregatorService.close_period после проводки всех документов месяца.
+        doc_przychody = state.kpir_entry.col_9_razem_przychody if state.kpir_entry else Decimal('0.00')
+        doc_koszty = state.kpir_entry.col_14_razem_wydatki if state.kpir_entry else Decimal('0.00')
+        monthly_profit = doc_przychody - doc_koszty
+        annual_revenue = state.ytd_przychody + doc_przychody
+
         zus = ZUSCalculator.calculate_monthly_obligations(
             profile=profile,
             target_month=target_date,
-            jdg_monthly_profit=monthly_profit
+            jdg_monthly_profit=monthly_profit,
+            # На ryczałcie без годовой выручки ZUSCalculator отказывается считать:
+            # от неё зависит ступень базы zdrowotnej 60/100/180%. Раньше сюда не
+            # передавалось ничего, и любой документ такого JDG падал ValueError.
+            annual_revenue=annual_revenue,
         )
         state.zus_obligations = zus
 
@@ -223,9 +231,10 @@ def agent03_tax_node(state: AccountingGraphState) -> AccountingGraphState:
         tax_res = PITCalculator.calculate_monthly_jdg_advance(
             month=target_date.strftime("%Y-%m"),
             regime=regime,
-            income_ytd=monthly_profit,
-            costs_ytd=state.kpir_entry.col_14_razem_wydatki if state.kpir_entry else Decimal('0.00'),
-            social_zus_paid_ytd=zus.total_spoleczne
+            income_ytd=annual_revenue,
+            costs_ytd=doc_koszty,
+            social_zus_paid_ytd=zus.total_spoleczne,
+            ryczalt_rate=profile.jdg_ryczalt_rate if regime == TaxRegime.RYCZALT else None,
         )
         state.tax_result = tax_res
 

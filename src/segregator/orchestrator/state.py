@@ -43,6 +43,11 @@ class AccountingGraphState(BaseModel):
     sync_state: Optional[SyncState] = None
     sync_delta: List[str] = Field(default_factory=list) # Список новых неотработанных ID/хэшей
     is_delta_empty: bool = False
+
+    # Выручка с начала года по уже проведённым документам, без текущего.
+    # Заполняется сервисом перед вызовом графа: узлы не имеют доступа к БД, а
+    # без этой цифры agent03 подставлял заглушку и отказывался считать ryczałt.
+    ytd_przychody: Decimal = Decimal('0.00')
     
     # Agent-01: Ingestion & Vision
     facts: Optional[DocumentFacts] = None
