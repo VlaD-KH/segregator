@@ -54,6 +54,37 @@ def test_reserved_device_names_are_defused(reserved):
     assert result.startswith("_")
 
 
+@pytest.mark.parametrize(
+    "name,max_stem",
+    [("CONX.pdf", 3), ("NULL.txt", 3), ("COM12.pdf", 4), ("AUXY", 3)],
+)
+def test_truncation_must_not_manufacture_a_device_name(name, max_stem):
+    """Обрезка stem не должна создавать имя устройства из безобидного.
+
+    Проверка на CON/PRN/AUX идёт по исходной строке, а режется имя после неё —
+    значит `CONX` при коротком max_stem превращается в `CON`, и файл с таким
+    именем на Windows создать нельзя. При max_stem=120 недостижимо (имена
+    устройств короче), но порядок операций от этого не перестаёт быть неверным.
+    """
+    result = safe_filename(name, max_stem=max_stem)
+    # Обезврежено — значит имя перестало БЫТЬ именем устройства. Префикс «_»
+    # и есть обезвреживание, снимать его перед проверкой нельзя.
+    stem_head = result.split(".")[0].strip().upper()
+    assert stem_head not in {"CON", "PRN", "AUX", "NUL",
+                             *(f"COM{i}" for i in range(1, 10)),
+                             *(f"LPT{i}" for i in range(1, 10))}, (
+        f"{name!r} с max_stem={max_stem} дал {result!r} — это имя устройства"
+    )
+
+
+@pytest.mark.parametrize("name", ["  CON  .pdf", " NUL ", "CON .txt"])
+def test_device_name_padded_with_spaces_is_still_defused(name):
+    """Windows тримит пробелы вокруг имени, поэтому « CON » — это CON."""
+    result = safe_filename(name)
+    assert result.strip().split(".")[0].strip().upper() != "CON" or result.startswith("_")
+    assert result.strip().split(".")[0].strip().upper() != "NUL" or result.startswith("_")
+
+
 def test_reserved_name_as_part_of_longer_name_is_left_alone():
     """Запрещено само имя устройства, а не подстрока: CONTRAKT — обычное слово."""
     assert safe_filename("CONTRAKT.pdf") == "CONTRAKT.pdf"

@@ -43,16 +43,21 @@ def safe_filename(name: str, *, max_stem: int = 120) -> str:
     if not s:
         return "bez-nazwy"
 
-    # 3. Имена устройств (до первой точки без учёта регистра)
-    first_part = s.split(".")[0]
-    if first_part.upper() in DEVICE_NAMES:
-        s = "_" + s
-
-    # 4. Обрезка stem до max_stem, suffix сохраняется
+    # 3. Обрезка stem до max_stem, suffix сохраняется
     p = Path(s)
     stem = p.stem[:max_stem]
     suffix = p.suffix
     result = stem + suffix
+
+    # 4. Имена устройств — ПОСЛЕ обрезки, а не до неё.
+    #    Обрезка сама умеет изготовить имя устройства из безобидного:
+    #    `CONX.pdf` с max_stem=3 давал `CON.pdf`, а такой файл на Windows
+    #    не создаётся вовсе. При max_stem=120 это недостижимо (имена
+    #    устройств короче), но порядок операций от этого не верен.
+    #    Пробелы снимаются перед сверкой: Windows тримит их сам, и « CON »
+    #    открывается как устройство CON.
+    if result.split(".")[0].strip().upper() in DEVICE_NAMES:
+        result = "_" + result
 
     # 5. Если после всего строка пуста
     if not result:

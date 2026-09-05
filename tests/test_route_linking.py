@@ -102,6 +102,31 @@ def test_other_os_errors_are_not_swallowed(blob, tmp_path, monkeypatch):
     assert excinfo.value.errno == errno.EACCES
 
 
+def test_cross_volume_warning_does_not_leak_the_document_name(blob, tmp_path, monkeypatch, caplog):
+    """Контур важнее удобства отладки.
+
+    Имя файла в архиве собрано из данных документа —
+    `2025-11-10__koszty__orlen__FV_2025_11_100.pdf` несёт и контрагента, и
+    номер фактуры. Инвариант 3 DATA_BOUNDARY.md не делает исключения для
+    предупреждений: то же самое, за что заведён дефект D2, только там это
+    были исключения, а здесь лог.
+    """
+    monkeypatch.setattr(os, "link", lambda src, dst: (_ for _ in ()).throw(
+        OSError(errno.EXDEV, "Invalid cross-device link")))
+
+    named = tmp_path / "blobs" / "2025-11-10__koszty__orlen__FV_2025_11_100.pdf"
+    named.parent.mkdir(parents=True, exist_ok=True)
+    named.write_bytes(b"tresc")
+
+    with caplog.at_level("WARNING"):
+        link_or_copy(named, tmp_path / "archiwum" / "2025-11-10__koszty__orlen__FV_2025_11_100.pdf")
+
+    said = " ".join(r.message for r in caplog.records)
+    assert "orlen" not in said.lower(), "имя контрагента ушло в лог"
+    assert "FV_2025_11_100" not in said, "номер фактуры ушёл в лог"
+    assert ".pdf" not in said, "имя файла документа ушло в лог"
+
+
 def test_cross_volume_message_names_the_volumes(blob, tmp_path, monkeypatch, caplog):
     """«Объясняется» из F-5.4 — это внятная запись, а не тихий откат."""
     monkeypatch.setattr(os, "link", lambda src, dst: (_ for _ in ()).throw(
