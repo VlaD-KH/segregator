@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shutil
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -36,6 +35,9 @@ from segregator.ingest.blobs import store_blob as ingest_store_blob, blob_relati
 from segregator.accounting.period import PeriodTotals, close_month, next_lp
 from segregator.domain.models import ZUSObligations
 from segregator.domain.zus import ZUSCalculator
+from segregator.route.linking import link_or_copy
+from segregator.route.naming import unique_path
+from segregator.route.tree import document_tree_path, payment_tree_path
 from segregator.tax.pit import MonthlyTaxResult, PITCalculator
 
 
@@ -47,26 +49,8 @@ class PeriodClosing:
     tax: MonthlyTaxResult
 
 
-class MonthNames:
-    """Польские названия месяцев для файлового дерева."""
-    PL_MONTHS = {
-        1: "01-styczen",
-        2: "02-luty",
-        3: "03-marzec",
-        4: "04-kwiecien",
-        5: "05-maj",
-        6: "06-czerwiec",
-        7: "07-lipiec",
-        8: "08-sierpien",
-        9: "09-wrzesien",
-        10: "10-pazdziernik",
-        11: "11-listopad",
-        12: "12-grudzien",
-    }
-
-    @classmethod
-    def get_month_folder(cls, month: int) -> str:
-        return cls.PL_MONTHS.get(month, f"{month:02d}-miesiac")
+# Имена месяцев жили здесь своей копией и молча отдавали `13-miesiac` вместо
+# отказа. Единственный источник теперь — route/tree.py: month_folder().
 
 
 class SegregatorService:
@@ -220,9 +204,17 @@ class SegregatorService:
         final_state = self.graph.invoke(initial_state)
 
         if not final_state.is_delta_empty and final_state.facts:
-            self._save_results_to_db(sha, file_path.name, blob_file, final_state, profile)
+            # Раскладка ИДЁТ ПЕРВОЙ. Раньше сначала коммитился результат в БД, и
+            # падение копирования оставляло проводку в книге без бумаги под ней.
+            # Обратный порядок в худшем случае оставляет лишнюю ссылку в дереве
+            # без проводки — это видно глазами и чинится, в отличие от книги,
+            # ссылающейся в пустоту.
+            tree_paths: Optional[tuple[str, str]] = None
             if final_state.kpir_entry:
-                self._route_to_archive(file_path, final_state)
+                tree_paths = self._route_to_archive(blob_file, final_state)
+            self._save_results_to_db(
+                sha, file_path.name, blob_file, final_state, profile, tree_paths
+            )
 
         return final_state
 
@@ -232,7 +224,8 @@ class SegregatorService:
         orig_name: str,
         blob_path: Path,
         state: AccountingGraphState,
-        profile: TaxpayerProfile
+        profile: TaxpayerProfile,
+        tree_paths: Optional[tuple[str, str]] = None,
     ):
         """Сохранение результатов работы агентов в таблицы SQLite с маскированием IBAN."""
         conn = get_connection(self.db_path)
@@ -276,8 +269,9 @@ class SegregatorService:
                 """
                 INSERT INTO documents (
                     attachment_id, doc_type, category, subcategory, confidence, decided_by,
-                    doc_date, counterparty, nip, doc_number, net, vat, gross, currency, reviewed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    doc_date, counterparty, nip, doc_number, net, vat, gross, currency,
+                    tree_path, link_path, reviewed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(attachment_id) DO NOTHING
                 """,
                 (
@@ -295,6 +289,11 @@ class SegregatorService:
                     vat,
                     brutto,
                     facts.currency,
+                    # tree_path / link_path объявлены в 0001:53-54 и не
+                    # заполнялись никогда: узнать, куда лёг документ, можно было
+                    # только обходом дерева.
+                    tree_paths[0] if tree_paths else None,
+                    tree_paths[1] if tree_paths else None,
                     datetime.now(timezone.utc).isoformat()
                 )
             )
@@ -603,32 +602,57 @@ class SegregatorService:
 
         return PeriodClosing(totals=totals, zus=zus, tax=tax)
 
-    def _route_to_archive(self, src_file: Path, state: AccountingGraphState):
-        """
-        Копирует документ в физическое дерево:
-        archiwum/wg-daty-dokumentu/{YYYY}/{MM-miesiac}/{category}/{filename}
+    def _route_to_archive(self, blob_file: Path, state: AccountingGraphState) -> tuple[str, str]:
+        """Раскладывает документ по двум деревьям архива и возвращает оба пути.
+
+        Ссылки ставятся на blob, а не на исходный файл: blob — канонический
+        экземпляр в CAS, деревья — способы его найти. Поэтому оба дерева и blob
+        остаются одним физическим файлом, и место не удваивается (F-5.3).
+
+        Имя больше не собирается вручную: `.replace("/", "_")` чистил один
+        символ из девяти запрещённых, и номер вида `FV\\12\\2026` уводил файл
+        в несуществующий подкаталог, а `FV:12` не создавался на NTFS вовсе —
+        проводка в книге оставалась, бумаги под ней не было. Санитайзер и
+        разрешение коллизий живут в route/naming.py, сборка пути — в
+        route/tree.py, которая сама зовёт safe_filename для категории и имени.
         """
         facts = state.facts
         doc_date = facts.doc_date or date.today()
-        year = str(doc_date.year)
-        month_folder = MonthNames.get_month_folder(doc_date.month)
-        
+
         category_name = "koszty"
         if state.proposal:
             if state.proposal.kpir_column == 7:
                 category_name = "przychody"
             elif "paliwo" in state.proposal.category.lower():
                 category_name = "koszty_paliwo"
-                
-        target_dir = self.archive_dir / year / month_folder / category_name
-        target_dir.mkdir(parents=True, exist_ok=True)
-        
-        seller_clean = (facts.seller_name or "kontrahent").lower().replace(" ", "_")[:15]
-        doc_nr_clean = (facts.doc_number or "fv").replace("/", "_")
-        target_filename = f"{doc_date.isoformat()}__{category_name}__{seller_clean}__{doc_nr_clean}{src_file.suffix}"
-        
-        target_path = target_dir / target_filename
-        shutil.copy2(src_file, target_path)
+
+        seller = (facts.seller_name or "kontrahent").lower().replace(" ", "_")[:15]
+        doc_nr = facts.doc_number or "fv"
+        filename = f"{doc_date.isoformat()}__{category_name}__{seller}__{doc_nr}{blob_file.suffix}"
+
+        # self.root, а не self.archive_dir: последний УЖЕ содержит
+        # archiwum/wg-daty-dokumentu, а document_tree_path добавляет этот
+        # префикс сам — иначе он удвоится.
+        by_document = unique_path(document_tree_path(self.root, doc_date, category_name, filename))
+        link_or_copy(blob_file, by_document)
+
+        # Второе дерево строилось скелетом и не заполнялось никогда (F-5.2).
+        # По дате документа считается налог, по дате платежа — что фактически
+        # оплачено; бухгалтер смотрит оба.
+        paid_raw = facts.get_field_val("data_platnosci")
+        paid_date: Optional[date] = None
+        if paid_raw:
+            try:
+                paid_date = date.fromisoformat(str(paid_raw))
+            except ValueError:
+                # Нечитаемая дата платежа — не повод терять документ:
+                # он ляжет в _bez-daty-platnosci, как и вовсе неоплаченный.
+                paid_date = None
+
+        by_payment = unique_path(payment_tree_path(self.root, paid_date, category_name, filename))
+        link_or_copy(blob_file, by_payment)
+
+        return str(by_document), str(by_payment)
 
     def generate_monthly_register(self, year: int, month: int) -> Path:
         """
