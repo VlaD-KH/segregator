@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ biz.name }} — prospektor{% endblock %}
+{% block subtitle %}{{ biz.city or '' }}{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 4px">{{ biz.name }}</h1>
+<p>
+  <span class="pill gap">Разрыв {{ '%.0f'|format(scored.gap) }}</span>
+  <span class="pill fit">Потенциал {{ '%.0f'|format(scored.fit) }}</span>
+  <span class="pill">Приоритет {{ '%.0f'|format(scored.priority) }}</span>
+  {% if biz.website %}<a href="{{ biz.website }}" rel="noopener nofollow">сайт</a>{% endif %}
+  <a href="/lead/{{ biz.id }}/dossier">досье</a>
+</p>
+
+<h2>Что сломано</h2>
+<div class="wrap">
+<table>
+  <thead><tr><th>Сигнал</th><th class="num">Вес</th><th>Значение</th><th>Почему это важно</th><th>Проверено на</th></tr></thead>
+  <tbody>
+  {% for miss in scored.breakdown.misses %}
+    <tr>
+      <td><code>{{ miss.signal }}</code></td>
+      <td class="num">{{ '%.0f'|format(miss.weight) }}</td>
+      <td>{{ miss.actual }} <span class="pill">ожидалось {{ miss.expected }}</span></td>
+      <td class="why">{{ miss.why or '' }}</td>
+      <td>{% set url = evidence.get(miss.signal) %}{% if url %}<a href="{{ url }}" rel="noopener nofollow">источник</a>{% else %}—{% endif %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5">Дефектов не найдено.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Все сигналы</h2>
+<dl class="sig">
+{% for key, value in signals.items() %}
+  <dt>{{ key }}</dt><dd>{{ value }}</dd>
+{% endfor %}
+</dl>
+{% endblock %}

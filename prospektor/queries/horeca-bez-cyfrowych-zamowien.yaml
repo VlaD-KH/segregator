@@ -1,0 +1,16 @@
+# Заведения, у которых спрос есть, а цифрового канала нет.
+# Ровно тот сценарий, ради которого модуль и писался.
+name: horeca-bez-cyfrowych-zamowien
+profile: horeca_pl
+where:
+  - country: PL
+  - category_in: [restauracja, pizzeria, sushi, kebab, kawiarnia]
+  - rep.reviews_count: {gte: 30}      # спрос подтверждён
+  - rep.rating: {gte: 4.0}            # качество подтверждено
+  - any_of:                            # а канала нет
+      - web.has_site: false
+      - aio.menu_is_image_only: true
+      - ops.online_order: false
+      - ops.aggregator_only: true
+order_by: priority desc
+limit: 200

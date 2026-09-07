@@ -1,0 +1,8 @@
+# Заказы идут, но через чужую кассу. Питч: свой канал без комиссии.
+name: agregator-only
+profile: horeca_pl
+where:
+  - country: PL
+  - ops.aggregator_only: true
+  - ops.aggregators: {contains: glovo}
+order_by: fit desc

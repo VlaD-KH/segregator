@@ -1,0 +1,23 @@
+# Кухни: нормализация свободных значений OSM `cuisine=` и Overture в наши ключи.
+# Нужны для фильтра «по кухням».
+#
+# Две гранулярности одновременно и намеренно: `asian` как зонтик и `japanese`
+# отдельным ключом. Запрос «азиатская кухня» и запрос «японская» — это разные
+# запросы, и разрешать их в один ключ значит терять точность выборки.
+cuisines:
+  asian: [asian, chinese, thai, vietnamese, japanese, sushi, korean, ramen, wok, pho, asiatycka]
+  japanese: [japanese, sushi, ramen, japonska, japońska]
+  thai: [thai, tom_yum, tajska]
+  chinese: [chinese, wok, chinska, chińska]
+  vietnamese: [vietnamese, pho, wietnamska]
+  korean: [korean, koreanska]
+  italian: [italian, pizza, pasta, wloska, włoska]
+  polish: [polish, polska, regional, pierogi, kuchnia_domowa]
+  turkish: [turkish, kebab, doner, turecka]
+  american: [american, burger, bbq, steak, steak_house]
+  georgian: [georgian, gruzinska, gruzińska]
+  indian: [indian, curry, hinduska]
+  mexican: [mexican, tex-mex, meksykanska]
+  vegan: [vegan, vegetarian, wegańska, wegetarianska]
+  seafood: [seafood, fish, ryby]
+  dessert: [ice_cream, cake, dessert, coffee_shop, cukiernia, lody]

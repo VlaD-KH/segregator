@@ -12,7 +12,9 @@
       "Read(./.env)",
       "Read(./**/.env)",
       "Bash(curl:*)",
-      "Bash(wget:*)"
+      "Bash(wget:*)",
+      "Read(./prospektor/data/**)",
+      "Read(./prospektor/exports/**)"
     ],
     "ask": [
       "Bash(git push:*)",
@@ -26,6 +28,8 @@
       "Edit(./probe/**)"
     ],
     "allow": [
+      "Edit(./prospektor/**)",
+      "Read(./prospektor/**)",
       "Read(./src/**)",
       "Read(./agents/**)",
       "Read(./rules/**)",

@@ -1,0 +1,75 @@
+# Канонические категории prospektor -> теги OSM и типы Overture.
+# Один слой отображения: смена источника не должна ломать профили и запросы.
+
+categories:
+  restauracja:
+    aliases: [restaurant, ресторан]
+    osm: ["amenity=restaurant"]
+    overture: [restaurant, fine_dining_restaurant]
+  pizzeria:
+    aliases: [pizza, пиццерия]
+    osm: ["amenity=restaurant][cuisine~pizza"]
+    overture: [pizza_restaurant]
+  sushi:
+    aliases: [суши, japanese]
+    osm: ["amenity=restaurant][cuisine~sushi|japanese"]
+    overture: [sushi_restaurant, japanese_restaurant]
+  kebab:
+    aliases: [кебаб, fast_food]
+    osm: ["amenity=fast_food"]
+    overture: [fast_food_restaurant, kebab_restaurant]
+  burger:
+    aliases: [бургерная]
+    osm: ["amenity=fast_food][cuisine~burger"]
+    overture: [burger_restaurant]
+  kawiarnia:
+    aliases: [cafe, кофейня]
+    osm: ["amenity=cafe"]
+    overture: [cafe, coffee_shop]
+  cukiernia:
+    aliases: [кондитерская, pastry]
+    osm: ["shop=pastry", "shop=confectionery"]
+    overture: [bakery, dessert_shop]
+  bar:
+    aliases: [pub, бар]
+    osm: ["amenity=bar", "amenity=pub"]
+    overture: [bar, pub]
+  hotel:
+    aliases: [отель, zakwaterowanie]
+    osm: ["tourism=hotel", "tourism=guest_house", "tourism=hostel"]
+    overture: [hotel, hostel, guest_house]
+  fryzjer:
+    aliases: [barber, парикмахерская]
+    osm: ["shop=hairdresser"]
+    overture: [hair_salon, barber]
+  kosmetyczka:
+    aliases: [beauty, салон красоты]
+    osm: ["shop=beauty"]
+    overture: [beauty_salon, nail_salon]
+  silownia:
+    aliases: [fitness, спортзал]
+    osm: ["leisure=fitness_centre"]
+    overture: [gym, fitness_center]
+  warsztat_samochodowy:
+    aliases: [сто, car_repair]
+    osm: ["shop=car_repair"]
+    overture: [auto_repair]
+  stomatolog:
+    aliases: [dentist, стоматология]
+    osm: ["amenity=dentist", "healthcare=dentist"]
+    overture: [dentist]
+  weterynarz:
+    aliases: [vet, ветклиника]
+    osm: ["amenity=veterinary"]
+    overture: [veterinarian]
+  biuro_rachunkowe:
+    aliases: [accountant, бухгалтерия]
+    osm: ["office=accountant"]
+    overture: [accounting_service]
+
+# Наборы категорий под профили. discover --profile horeca_pl берёт этот набор.
+sets:
+  horeca_pl: [restauracja, pizzeria, sushi, kebab, burger, kawiarnia, cukiernia, bar]
+  beauty_pl: [fryzjer, kosmetyczka]
+  auto_pl: [warsztat_samochodowy]
+  health_pl: [stomatolog, weterynarz]

@@ -1,0 +1,6 @@
+.venv/
+data/
+exports/
+cache/
+.ruff_cache/
+.mypy_cache/

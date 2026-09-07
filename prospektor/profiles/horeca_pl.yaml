@@ -1,0 +1,124 @@
+# Профиль скоринга: HoReCa, Польша.
+#
+# Два независимых числа. gap — сколько сломано и сколько можно починить.
+# fit — есть ли у заведения спрос и деньги, чтобы это чинить. Смешивать их
+# в один балл нельзя: заведение с рейтингом 4.6 и 400 отзывами без сайта и
+# заведение с 2.1 и пятью отзывами имеют одинаковый gap и совершенно разную
+# ценность как лид.
+#
+# Веса — не истина, а гипотеза. Их и надо калибровать на первых 50 лидах.
+
+name: horeca_pl
+label: HoReCa Polska
+categories: horeca_pl
+
+gap:
+  # Каждое правило: сигнал, ожидаемое состояние и вес. Балл начисляется,
+  # когда состояние НЕ выполнено, то есть когда есть что чинить.
+  rules:
+    # --- канал заказов: самый дорогой разрыв -------------------------
+    - signal: ops.own_order_channel
+      expect: true
+      weight: 18
+      why: "Нет собственного канала заказа — весь онлайн-спрос уходит через чужую кассу или теряется"
+    - signal: ops.aggregator_only
+      expect: false
+      weight: 12
+      why: "Заказы идут только через агрегатор: комиссия ~30% с каждого заказа"
+    - signal: ops.phone_only
+      expect: false
+      weight: 10
+      why: "Заказать можно только звонком в рабочие часы — всё, что вне их, потеряно"
+
+    # --- читаемость для ИИ-агентов -----------------------------------
+    - signal: aio.localbusiness_schema
+      expect: true
+      weight: 12
+      why: "Нет разметки Schema.org: агенту нечего процитировать, он берёт конкурента"
+    - signal: aio.menu_machine_readable
+      expect: true
+      weight: 12
+      why: "Меню не читается машиной — запрос вида «острое, без глютена» проходит мимо"
+    - signal: aio.menu_is_image_only
+      expect: false
+      weight: 8
+      why: "Меню выложено картинкой или PDF: состав и цены недоступны ни агенту, ни поиску"
+    - signal: aio.ai_crawlers_allowed
+      expect: true
+      weight: 8
+      why: "robots.txt закрывает ИИ-роботов — заведения не существует там, где растёт спрос"
+    - signal: aio.diet_tags
+      expect: true
+      weight: 4
+      why: "Нет тегов диет и аллергенов — фильтры ассистентов выкидывают заведение"
+    - signal: aio.js_dependent
+      expect: false
+      weight: 6
+      why: "Контент появляется только после JS: робот видит пустую страницу"
+    - signal: aio.jsonld_broken
+      expect: false
+      weight: 4
+      why: "Разметка есть, но не парсится — чинится за вечер, эффект как от новой"
+
+    # --- присутствие и SEO -------------------------------------------
+    - signal: web.has_site
+      expect: true
+      weight: 14
+      why: "Нет работающего сайта — нечего показать ни человеку, ни агенту"
+    - signal: web.only_social
+      expect: false
+      weight: 6
+      why: "Вместо сайта страница в соцсети: разметки нет, меню нет, каналом владеет платформа"
+    - signal: web.is_placeholder
+      expect: false
+      weight: 6
+      why: "На домене заглушка"
+    - signal: seo.title_ok
+      expect: true
+      weight: 3
+    - signal: seo.description_ok
+      expect: true
+      weight: 3
+    - signal: seo.h1_ok
+      expect: true
+      weight: 2
+    - signal: seo.indexable
+      expect: true
+      weight: 5
+      why: "Сайт закрыт от индексации"
+    - signal: seo.nap_phone_match
+      expect: true
+      weight: 4
+      why: "Телефон на сайте не совпадает с телефоном на карте"
+    - signal: web.mobile_viewport
+      expect: true
+      weight: 4
+      why: "Нет мобильной вёрстки, а больше половины заказов — с телефона"
+    - signal: ops.reservation
+      expect: true
+      weight: 3
+    - signal: ops.chat
+      expect: true
+      weight: 2
+
+fit:
+  # Спрос: сколько отзывов. Логарифмическая шкала — разница между 10 и 100
+  # отзывами важнее, чем между 400 и 500.
+  reviews:
+    weight: 45
+    log_scale: true
+    saturate_at: 300
+  # Качество: ниже 3.5 разговор бессмысленен, выше 4.5 — идеальный клиент,
+  # которому не хватает только канала.
+  rating:
+    weight: 35
+    floor: 3.2
+    ceiling: 4.8
+  # Доступность: если не к кому обратиться, лид не лид.
+  reachability:
+    weight: 20
+
+# priority = gap^alpha * fit^(1-alpha). Не сумма: заведение, у которого
+# нулевой fit, не должно всплывать наверх за счёт большого gap.
+priority:
+  alpha: 0.55

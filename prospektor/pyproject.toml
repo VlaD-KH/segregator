@@ -1,0 +1,65 @@
+[project]
+name = "prospektor"
+version = "0.1.0"
+description = "Поиск бизнесов и скоринг разрывов: нет сайта, нет онлайн-заказа, слабое SEO, невидимость для ИИ-агентов"
+requires-python = ">=3.12"
+dependencies = [
+    # Стек намеренно совпадает с корневым segregator (pyproject.toml:6-24), чтобы
+    # вынос модуля в свой репозиторий и обратное слияние были механическими.
+    "pydantic>=2.12",
+    "pydantic-settings>=2.12",
+    "httpx>=0.28",
+    "typer>=0.25",
+    "structlog>=24.1",
+    "rich>=13.0",
+    "PyYAML>=6.0",
+    # Разбор HTML — на stdlib html.parser (модуль probes/htmldoc.py). Причина та же,
+    # по которой корневой проект отказался от lxml: на машине без дискретной видеокарты
+    # и с 19 ГБ свободного диска ничего не должно компилироваться при установке.
+]
+
+[project.optional-dependencies]
+# Дашборд отделён: CLI-часть должна ставиться и работать без веб-стека.
+web = ["fastapi>=0.115", "uvicorn>=0.30", "jinja2>=3.1"]
+# Экспорт в XLSX. CSV работает всегда, из stdlib.
+xlsx = ["openpyxl>=3.1"]
+# Overture Places лежит parquet-ом на S3; читается DuckDB с bbox-фильтром.
+overture = ["duckdb>=1.1"]
+# Проба aio.js_dependent — единственное место, где нужен браузер.
+render = ["playwright>=1.47"]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "ruff>=0.7",
+    "mypy>=1.11",
+]
+
+[project.scripts]
+prospektor = "prospektor.cli:app"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+prospektor = ["py.typed", "web/templates/*.html", "store/*.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["prospektor"]
+ignore_missing_imports = true

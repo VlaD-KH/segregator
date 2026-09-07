@@ -1,0 +1,45 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(//C:/Users/Huawei/Downloads/**)",
+      "Read(../JDG/**)",
+      "Read(../ChatExport_*/**)",
+      "Read(../archiwum/**)",
+      "Read(../blobs/**)",
+      "Read(../rejestry/**)",
+      "Read(../logs/**)",
+      "Read(../*.db)",
+      "Read(../src/**)",
+      "Read(../agents/**)",
+      "Read(./.env)",
+      "Read(./**/.env)",
+      "Read(./data/**)",
+      "Bash(curl:*)",
+      "Bash(wget:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(pip install:*)",
+      "Edit(./pyproject.toml)",
+      "Edit(./src/prospektor/sources/gray/**)"
+    ],
+    "allow": [
+      "Read(./src/**)",
+      "Read(./tests/**)",
+      "Read(./docs/**)",
+      "Read(./profiles/**)",
+      "Read(./queries/**)",
+      "Read(./taxonomy/**)",
+      "Edit(./src/**)",
+      "Edit(./tests/**)",
+      "Edit(./docs/**)",
+      "Edit(./profiles/**)",
+      "Edit(./queries/**)",
+      "Edit(./taxonomy/**)",
+      "Bash(pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(mypy:*)"
+    ]
+  }
+}

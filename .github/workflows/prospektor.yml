@@ -1,0 +1,33 @@
+# Отдельный workflow для изолированного модуля: он не должен ни запускаться на
+# изменениях основного проекта, ни ронять его сборку своими зависимостями.
+name: prospektor
+
+on:
+  push:
+    paths: ['prospektor/**', '.github/workflows/prospektor.yml']
+  pull_request:
+    paths: ['prospektor/**', '.github/workflows/prospektor.yml']
+
+defaults:
+  run:
+    working-directory: prospektor
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Установить модуль
+        run: pip install -e '.[dev,xlsx,web]'
+      - name: Страж изоляции
+        # Отдельным шагом и первым: если граница пробита, остальное не важно.
+        run: pytest tests/test_isolation.py -q
+      - name: Тесты
+        run: pytest -q
+      - name: Линтер
+        run: ruff check .
+      - name: Типы
+        run: mypy
