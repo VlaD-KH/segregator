@@ -40,7 +40,9 @@ class Settings(BaseSettings):
     pagespeed_api_key: str | None = None
     overpass_url: str = "https://overpass-api.de/api/interpreter"
     # Релиз Overture фиксируется явно: «последний» ломает воспроизводимость выборки.
-    overture_release: str = "2026-08-20.0"
+    # Значение сверено со списком бакета (прогон по Старгарду 2026-09-07); проверить
+    # актуальный набор можно листингом префикса `release/` в S3-бакете Overture.
+    overture_release: str = "2026-08-19.0"
 
     # Бюджет платных источников на один прогон, в USD. Превышение — отказ, не трата.
     budget_usd: float = 0.0
