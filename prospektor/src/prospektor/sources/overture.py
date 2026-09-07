@@ -42,14 +42,20 @@ class OvertureSource(SourceAdapter):
 
         for category in categories:
             overture_cats.extend(category_map().get(category, {}).get("overture", []))
-        # Фильтр по категории — на стороне DuckDB, чтобы не тянуть лишние строки по сети
+        # Фильтр по категории — на стороне DuckDB, чтобы не тянуть лишние строки по сети.
+        # Проверяются оба поля: зонтичные значения вроде `beauty_and_spa` встречаются
+        # только в `alternate`, и по одному `primary` терялась половина заведений.
         cat_filter = ""
         if overture_cats:
             values = ", ".join(f"'{c}'" for c in sorted(set(overture_cats)))
-            cat_filter = f"AND categories.primary IN ({values})"
+            cat_filter = (
+                f"AND (categories.primary IN ({values})"
+                f" OR len(list_intersect(categories.alternate, [{values}])) > 0)"
+            )
         source = S3_TEMPLATE.format(release=release)
         return f"""
             SELECT id, names.primary AS name, categories.primary AS category,
+                   categories.alternate AS category_alt,
                    confidence, websites, phones, emails, socials,
                    addresses[1].freeform AS street, addresses[1].locality AS city,
                    addresses[1].postcode AS postcode, addresses[1].country AS country,
@@ -113,6 +119,19 @@ class OvertureSource(SourceAdapter):
         add("postal_code", row.get("postcode"), 0.65)
         add("street", row.get("street"), 0.65)
         add("category_raw", row.get("category"), 0.7)
+        # Дополнительные категории идут отдельными фактами: они точнее основной.
+        # У салона с `primary = spas` в alternate лежат `nail_salon` и `beauty_salon`.
+        for alt in row.get("category_alt") or []:
+            if alt:
+                facts.append(
+                    Fact(
+                        field="category_raw",
+                        value=str(alt),
+                        source="overture",
+                        source_url=url,
+                        confidence=0.55,
+                    )
+                )
 
         return RawRecord(
             source="overture",
@@ -122,5 +141,9 @@ class OvertureSource(SourceAdapter):
             facts=facts,
             lat=row.get("lat"),
             lon=row.get("lon"),
-            raw={"category": row.get("category"), "confidence": row.get("confidence")},
+            raw={
+                "category": row.get("category"),
+                "category_alt": list(row.get("category_alt") or []),
+                "confidence": row.get("confidence"),
+            },
         )

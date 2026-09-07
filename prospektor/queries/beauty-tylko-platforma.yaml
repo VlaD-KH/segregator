@@ -1,0 +1,9 @@
+# Салоны, у которых всё веб-присутствие — профиль на чужой площадке.
+# Готовый лид-лист: виден сразу после discover, аудита не требует.
+name: beauty-tylko-platforma
+profile: beauty_pl
+where:
+  - country: PL
+  - web.platform_profile_only: true
+order_by: priority desc
+limit: 300

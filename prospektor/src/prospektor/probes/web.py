@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 
 from prospektor.models import Signal
+from prospektor.platforms import UrlKind, classify_url
 from prospektor.probes.context import Context
 
 # Признаки «сайта нет, а есть заглушка». Проверяются вместе с малым объёмом текста,
@@ -28,8 +29,6 @@ _PLACEHOLDER_MARKERS = (
     "it works!",
     "index of /",
 )
-
-_SOCIAL_HOSTS = ("facebook.com", "fb.me", "instagram.com", "linktr.ee", "tiktok.com")
 
 # Отпечатки движков. Дают понять, что чинить: у сайта на конструкторе разметку
 # правит владелец, у самописа — нужен разработчик.
@@ -57,24 +56,44 @@ def probe(ctx: Context) -> list[Signal]:
     evidence = ctx.home.evidence() if ctx.home else None
 
     declared = bool(website)
-    only_social = declared and any(host in website.lower() for host in _SOCIAL_HOSTS)
-    reachable = ctx.has_page
+    kind, _platform = classify_url(website)
+    only_social = kind is UrlKind.SOCIAL
+    # Адрес, ведущий на чужую площадку, — не собственный сайт, и это известно
+    # без загрузки: у профиля в Booksy или на Facebook нет ни своей разметки,
+    # ни своего канала заказа, и владелец им не управляет.
+    foreign_profile = declared and kind is not UrlKind.OWN
+    reachable = ctx.has_page and not foreign_profile
 
-    # «Сайт есть» означает работающий собственный сайт. Страница в Facebook —
-    # это не сайт: там нет ни разметки, ни меню, ни приёма заказов, и владелец
-    # не управляет тем, что о нём прочитает агент.
-    out.append(Signal.flag("web.has_site", bool(reachable and not only_social), evidence))
     out.append(Signal.flag("web.declared_site", declared, evidence))
     out.append(Signal.flag("web.only_social", only_social, evidence))
-    out.append(Signal.flag("web.site_reachable", reachable, evidence))
 
     if declared:
         out.append(Signal.flag("web.https", website.lower().startswith("https://"), evidence))
 
-    if not reachable:
-        if declared:
-            error = ctx.home.error if ctx.home else "not-fetched"
-            out.append(Signal.data("web.fetch_error", error, evidence))
+    # Ключевое различение. «Сайта нет» — это утверждение о мире, и выставлять его
+    # можно только тогда, когда мы это установили: адрес не заявлен вовсе, либо
+    # домен не резолвится, либо главная отвечает 404. Таймаут, 403 и обрыв
+    # соединения означают «не проверено», и тогда сигнал не выставляется вообще —
+    # правило скоринга его пропустит, вместо того чтобы наказать бизнес за наш сбой.
+    if reachable:
+        out.append(Signal.flag("web.has_site", True, evidence))
+        out.append(Signal.flag("web.site_reachable", True, evidence))
+    elif foreign_profile:
+        out.append(Signal.flag("web.has_site", False, evidence))
+    elif not declared:
+        out.append(Signal.flag("web.has_site", False, evidence))
+        out.append(Signal.flag("web.site_reachable", False, evidence))
+    elif ctx.home is not None and ctx.home.absent:
+        out.append(Signal.flag("web.has_site", False, evidence))
+        out.append(Signal.flag("web.site_reachable", False, evidence))
+        out.append(Signal.data("web.check_failed", str(ctx.home.failure), evidence))
+    else:
+        # Сайт заявлен, но проверить его не удалось: has_site не выставляем.
+        reason = str(ctx.home.failure) if ctx.home and ctx.home.failure else "not_fetched"
+        out.append(Signal.flag("web.check_inconclusive", True, evidence))
+        out.append(Signal.data("web.check_failed", reason, evidence))
+
+    if not ctx.has_page:
         return out
 
     doc = ctx.doc

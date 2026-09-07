@@ -30,6 +30,11 @@ def page(name: str, url: str = "https://example.pl/") -> Page:
     return Page(url=url, status=200, headers={}, body=load_site(name), final_url=url)
 
 
+def failed_page(failure, url: str = "https://example.pl/", status: int | None = None) -> Page:
+    """Страница, которую не удалось загрузить, с указанной причиной."""
+    return Page(url=url, status=status, body="", error=str(failure), failure=failure)
+
+
 def make_context(
     site: str | None = None,
     *,
@@ -42,6 +47,7 @@ def make_context(
     reviews: int | None = 120,
     rendered: str | None = None,
     map_tags: dict[str, str] | None = None,
+    home: object = None,
 ) -> Context:
     biz = Business(
         id="test", name=name, city=city, website=website, phone=phone,
@@ -49,7 +55,7 @@ def make_context(
     )
     ctx = Context(
         business=biz,
-        home=page(site) if site else None,
+        home=home if home is not None else (page(site) if site else None),
         robots_txt=load_robots(robots),
         map_tags=map_tags or {},
     )

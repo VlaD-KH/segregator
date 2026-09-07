@@ -1,3 +1,3 @@
-from prospektor.fetch.fetcher import Fetcher, Page
+from prospektor.fetch.fetcher import DEFINITIVE_ABSENCE, Failure, Fetcher, Page
 
-__all__ = ["Fetcher", "Page"]
+__all__ = ["DEFINITIVE_ABSENCE", "Failure", "Fetcher", "Page"]

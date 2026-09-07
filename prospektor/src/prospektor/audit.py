@@ -14,7 +14,7 @@ import httpx
 
 from prospektor.config import Settings
 from prospektor.fetch import Fetcher, Page
-from prospektor.models import Business, Signal
+from prospektor.models import Business, Signal, utcnow
 from prospektor.probes import Context, run_all
 from prospektor.store import Store
 
@@ -109,6 +109,11 @@ async def audit_business(
                 ctx.psi = await _pagespeed(website, pagespeed_key)
 
     signals = run_all(ctx)
+    # Отдельный маркер: часть сигналов пишется ещё на стадии enrich (классификация
+    # адреса не требует сети), поэтому «есть хоть какие-то сигналы» больше не
+    # означает «аудит прошёл». Без маркера отбор кандидатов считал бы проверенными
+    # вообще все карточки.
+    signals.append(Signal.number("audit.completed_at", utcnow().timestamp()))
     store.put_signals(biz.id, signals)
     return signals
 

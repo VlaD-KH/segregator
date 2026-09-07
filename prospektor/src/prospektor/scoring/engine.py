@@ -29,6 +29,10 @@ class Rule:
     expect: Any
     weight: float
     why: str | None = None
+    # Заголовок предложения. Живёт в профиле, а не в общем словаре, потому что
+    # один и тот же сигнал означает разное в разных вертикалях: «только агрегатор»
+    # у ресторана — это комиссия с заказа, у салона — абонплата за площадку.
+    title: str | None = None
 
 
 @dataclass
@@ -51,6 +55,10 @@ class Scored:
     fit: float
     priority: float
     reachable: bool
+    # Доля веса профиля, которая реально была измерена. Разрыв 100 по двум
+    # правилам из девятнадцати и разрыв 100 по пятнадцати — разные утверждения,
+    # и без этого числа они выглядели бы одинаково.
+    coverage: float = 0.0
     breakdown: dict[str, Any] = field(default_factory=dict)
 
 
@@ -67,6 +75,7 @@ def load_profile(name: str) -> Profile:
             expect=r.get("expect", True),
             weight=float(r.get("weight", 1)),
             why=r.get("why"),
+            title=r.get("title"),
         )
         for r in (data.get("gap") or {}).get("rules", [])
     ]
@@ -80,7 +89,9 @@ def load_profile(name: str) -> Profile:
     )
 
 
-def _gap(profile: Profile, signals: dict[str, Any]) -> tuple[float, list[dict[str, Any]]]:
+def _gap(
+    profile: Profile, signals: dict[str, Any]
+) -> tuple[float, float, list[dict[str, Any]]]:
     earned = 0.0
     considered = 0.0
     misses: list[dict[str, Any]] = []
@@ -101,12 +112,16 @@ def _gap(profile: Profile, signals: dict[str, Any]) -> tuple[float, list[dict[st
                     "actual": actual,
                     "weight": rule.weight,
                     "why": rule.why,
+                    "title": rule.title,
                 }
             )
+    coverage = round(considered / profile.total_weight, 3)
     if considered == 0:
-        return 0.0, misses
-    return round(100 * earned / considered, 1), sorted(
-        misses, key=lambda m: -m["weight"]
+        return 0.0, 0.0, misses
+    return (
+        round(100 * earned / considered, 1),
+        coverage,
+        sorted(misses, key=lambda m: -m["weight"]),
     )
 
 
@@ -150,7 +165,7 @@ def _fit(profile: Profile, biz: Business, signals: dict[str, Any]) -> tuple[floa
 
 
 def score_business(profile: Profile, biz: Business, signals: dict[str, Any]) -> Scored:
-    gap, misses = _gap(profile, signals)
+    gap, coverage, misses = _gap(profile, signals)
     fit, fit_parts = _fit(profile, biz, signals)
     alpha = profile.alpha
     # Геометрическое среднее, а не сумма: нулевой fit обнуляет приоритет,
@@ -162,13 +177,27 @@ def score_business(profile: Profile, biz: Business, signals: dict[str, Any]) -> 
         fit=fit,
         priority=priority,
         reachable=reachable,
-        breakdown={"misses": misses, "fit": fit_parts},
+        coverage=coverage,
+        breakdown={"misses": misses, "fit": fit_parts, "coverage": coverage},
     )
 
 
-def score_all(store: Store, profile: Profile) -> int:
+def score_all(store: Store, profile: Profile, whole_city: bool = False) -> int:
+    """Оценить карточки по профилю.
+
+    По умолчанию — только те, что относятся к вертикали профиля: балл по правилам
+    красоты, выставленный фотографу, не значит ничего и лишь засоряет выдачу.
+    """
+    from prospektor.taxonomy import expand_to_source_values
+
+    scope = None
+    if not whole_city and profile.categories:
+        scope = expand_to_source_values([profile.categories])
+
     count = 0
     for biz in store.iter_businesses():
+        if scope is not None and not ({c.lower() for c in biz.categories} & scope):
+            continue
         signals = store.signals_for(biz.id)
         if not signals:
             continue
@@ -176,7 +205,8 @@ def score_all(store: Store, profile: Profile) -> int:
         with store.tx() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO scores (business_id, profile, gap, fit, priority, "
-                "reachable, breakdown, scored_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "reachable, coverage, breakdown, scored_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     biz.id,
                     profile.name,
@@ -184,6 +214,7 @@ def score_all(store: Store, profile: Profile) -> int:
                     scored.fit,
                     scored.priority,
                     int(scored.reachable),
+                    scored.coverage,
                     json.dumps(scored.breakdown, ensure_ascii=False),
                     utcnow().isoformat(),
                 ),

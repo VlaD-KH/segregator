@@ -31,7 +31,7 @@ _BUSINESS_COLUMNS = {
     "id", "name", "country", "city", "postal_code", "street",
     "phone", "email", "website", "rating", "reviews_count",
 }
-_SCORE_COLUMNS = {"gap", "fit", "priority", "reachable"}
+_SCORE_COLUMNS = {"gap", "fit", "priority", "reachable", "coverage"}
 
 
 class QueryError(ValueError):
@@ -170,7 +170,7 @@ def compile_query(spec: dict[str, Any], profile: str | None = None) -> tuple[str
 
     limit = int(spec.get("limit", 500))
     sql = f"""
-        SELECT b.*, sc.gap, sc.fit, sc.priority, sc.reachable, sc.breakdown
+        SELECT b.*, sc.gap, sc.fit, sc.priority, sc.reachable, sc.coverage, sc.breakdown
         FROM businesses b
         LEFT JOIN scores sc ON sc.business_id = b.id AND sc.profile = ?
         WHERE {where}

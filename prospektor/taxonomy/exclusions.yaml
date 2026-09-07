@@ -1,0 +1,118 @@
+# Что не является лидом ни при каких условиях.
+#
+# Составлено по прогону на Старгарде: из 2040 POI 13% оказались поштоматами,
+# банкоматами, школами и точками сетей. Аудит — самая дорогая стадия, и пускать
+# её на этот список означает тратить тысячи запросов впустую.
+
+# Категории Overture, которые не описывают бизнес, которому можно что-то продать
+junk_categories:
+  - package_locker
+  - atms
+  - post_office
+  - public_service_and_government
+  - government_office
+  - public_plaza
+  - public_market
+  - community_services_non_profits
+  - religious_organization
+  - school
+  - college_university
+  - library
+  - park
+  - parking
+  - bus_station
+  - train_station
+  - landmark_and_historical_building
+  - hospital
+  - cemetery
+  - fire_department
+  - police_department
+  - courthouse
+  - embassy
+  - charity_organization
+  - non_profit_organization
+
+# Сети и франшизы: решение принимает не точка, а головной офис.
+# Сравнение по нормализованному названию, поэтому регистр и юрформа не важны.
+chain_names:
+  - żabka
+  - abc
+  - biedronka
+  - lidl
+  - aldi
+  - netto
+  - kaufland
+  - carrefour
+  - dino
+  - stokrotka
+  - delikatesy centrum
+  - lewiatan
+  - paczkomat inpost
+  - inpost
+  - automat dhl box 24/7
+  - dhl
+  - orlen paczka
+  - orlen
+  - bp
+  - shell
+  - circle k
+  - moya
+  - placówka pocztowa
+  - poczta polska
+  - deichmann
+  - ccc
+  - rossmann
+  - hebe
+  - pepco
+  - action
+  - dealz
+  - media expert
+  - rtv euro agd
+  - neonet
+  - empik
+  - western union
+  - santander
+  - pko bank polski
+  - bank pekao
+  - ing bank śląski
+  - mbank
+  - alior bank
+  - credit agricole
+  - millennium
+  - żabka nano
+  - mcdonald's
+  - kfc
+  - burger king
+  - subway
+  - telepizza
+  - da grasso
+  - north fish
+  - costa coffee
+  - starbucks
+  - so coffee
+  - green caffè nero
+  - castorama
+  - leroy merlin
+  - obi
+  - jysk
+  - agata meble
+  - pepco home
+  - sinsay
+  - reserved
+  - house
+  - cropp
+  - mohito
+  - martes sport
+  - decathlon
+  - smyk
+  - apteka gemini
+  - dr max
+  - ziko apteka
+
+# Названия, которые вообще не являются названиями бизнеса
+junk_name_patterns:
+  # Точка на карте, названная адресом, а не именем: «Stargard Ul. Wojska Polskiego».
+  # Точка после «ul» обязательна, иначе под шаблон попадут живые названия вроде «u Uli».
+  - '\bul\.\s'
+  - '\bulica\s'
+  - '^\d+\s*$'

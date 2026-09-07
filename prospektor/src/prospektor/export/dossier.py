@@ -14,7 +14,10 @@ from typing import Any
 from prospektor.models import Business
 from prospektor.scoring import Profile, Scored
 
-# Что предлагать по каждому промаху и почему это стоит денег.
+# Запасные формулировки, общие для всех вертикалей. Если профиль задал свои
+# `title` и `why` — берутся они: один и тот же сигнал означает разное у ресторана
+# и у салона красоты, и общий текст на второй вертикали был бы просто неверен.
+#
 # Это словарь предложений, а не «рекомендации ИИ»: он написан один раз,
 # проверяется глазами и меняется осознанно.
 REMEDIES: dict[str, tuple[str, str]] = {
@@ -134,7 +137,9 @@ def render_dossier(
     lines.append("")
     for miss in misses:
         signal = miss["signal"]
-        title, why = REMEDIES.get(signal, (signal, miss.get("why") or ""))
+        default_title, default_why = REMEDIES.get(signal, (signal, ""))
+        title = miss.get("title") or default_title
+        why = miss.get("why") or default_why
         lines.append(f"### {title}")
         lines.append("")
         lines.append(f"- Сигнал: `{signal}` = `{miss['actual']}` (ожидалось `{miss['expected']}`)")

@@ -86,6 +86,9 @@ CREATE TABLE IF NOT EXISTS scores (
     fit         REAL NOT NULL,
     priority    REAL NOT NULL,
     reachable   INTEGER NOT NULL DEFAULT 0,
+    -- доля веса профиля, которая была измерена: балл по двум правилам из
+    -- девятнадцати не равен баллу по пятнадцати
+    coverage    REAL NOT NULL DEFAULT 0,
     breakdown   TEXT NOT NULL DEFAULT '{}',
     scored_at   TEXT NOT NULL,
     PRIMARY KEY (business_id, profile)
@@ -101,6 +104,8 @@ CREATE TABLE IF NOT EXISTS fetch_cache (
     headers      TEXT NOT NULL DEFAULT '{}',
     body         TEXT,
     error        TEXT,
+    -- вид отказа: dns и not_found означают «сайта нет», остальное — «не проверено»
+    failure      TEXT,
     fetched_at   TEXT NOT NULL,
     PRIMARY KEY (url, mode)
 );

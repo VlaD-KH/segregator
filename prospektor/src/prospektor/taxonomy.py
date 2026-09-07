@@ -66,6 +66,35 @@ def osm_filters(category: str) -> list[str]:
     return list(categories().get(category, {}).get("osm", []))
 
 
+def source_values(category: str) -> set[str]:
+    """Значения источников, соответствующие канонической категории.
+
+    В карточке лежат сырые значения Overture (`beauty_salon`, `spas`), а профили
+    и фильтры оперируют каноническими именами (`kosmetyczka`). Без этого
+    отображения отбор кандидатов молча выбрасывал бы всех, у кого имя категории
+    в источнике не совпало с нашим случайно.
+    """
+    spec = categories().get(category, {})
+    values = {category, *(a.lower() for a in spec.get("aliases", []))}
+    values.update(v.lower() for v in spec.get("overture", []))
+    # Значения тегов OSM извлекаются из тех же фильтров, по которым идёт поиск:
+    # «shop=hairdresser» и «amenity=restaurant][cuisine~pizza» дают hairdresser
+    # и restaurant. Отдельный список не нужен и разъезжался бы с фильтрами.
+    for flt in spec.get("osm", []):
+        head = flt.split("]")[0]
+        if "=" in head:
+            values.add(head.split("=", 1)[1].strip().lower())
+    return values
+
+
+def expand_to_source_values(names: list[str]) -> set[str]:
+    """Канонические категории и наборы -> все значения, по которым их узнают."""
+    out: set[str] = set()
+    for category in resolve_categories(names):
+        out |= source_values(category)
+    return out
+
+
 def normalize_cuisine(raw: str | None) -> list[str]:
     """Значение тега ``cuisine`` OSM -> наши ключи кухонь.
 

@@ -18,6 +18,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -26,6 +27,29 @@ import httpx
 from prospektor.config import Settings
 from prospektor.models import Evidence, utcnow
 from prospektor.store import Store
+
+
+class Failure(StrEnum):
+    """Почему загрузка не удалась.
+
+    Различение здесь не педантизм, а требование корректности: «домена не
+    существует» и «сервер ответил 403» — принципиально разные факты. Первое
+    означает, что сайта нет, второе — что мы его не увидели. Прогон по Старгарду
+    показал, что без этого различия сбой загрузки превращается в выдуманный лид.
+    """
+
+    DNS = "dns"                # имя не резолвится — сайта действительно нет
+    NOT_FOUND = "not_found"    # 404/410 на главной — тоже определённое отсутствие
+    TIMEOUT = "timeout"
+    CONNECT = "connect"        # соединение не установилось или разорвано
+    TLS = "tls"
+    HTTP_ERROR = "http_error"  # 4xx/5xx кроме 404/410
+    ROBOTS = "robots"          # владелец попросил не заходить
+    RENDER = "render"
+
+
+# Отказы, из которых следует, что сайта нет. Всё остальное значит «не проверено».
+DEFINITIVE_ABSENCE = frozenset({Failure.DNS, Failure.NOT_FOUND})
 
 
 @dataclass
@@ -37,12 +61,23 @@ class Page:
     headers: dict[str, str] = field(default_factory=dict)
     body: str = ""
     error: str | None = None
+    failure: Failure | None = None
     final_url: str | None = None
     elapsed_ms: float | None = None
 
     @property
     def ok(self) -> bool:
         return self.error is None and self.status is not None and 200 <= self.status < 300
+
+    @property
+    def absent(self) -> bool:
+        """Установлено, что сайта нет, — а не что мы до него не достучались."""
+        return self.failure in DEFINITIVE_ABSENCE
+
+    @property
+    def inconclusive(self) -> bool:
+        """Загрузка не удалась, но об отсутствии сайта это ничего не говорит."""
+        return not self.ok and not self.absent
 
     def evidence(self, note: str | None = None) -> Evidence:
         return Evidence(
@@ -95,6 +130,7 @@ class Fetcher:
             headers=json.loads(row["headers"]),
             body=row["body"] or "",
             error=row["error"],
+            failure=Failure(row["failure"]) if row["failure"] else None,
             final_url=url,
         )
 
@@ -104,7 +140,7 @@ class Fetcher:
         with self.store.tx() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO fetch_cache (url, mode, status, headers, body, error, "
-                "fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "failure, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     page.url,
                     mode,
@@ -112,6 +148,7 @@ class Fetcher:
                     json.dumps(page.headers, ensure_ascii=False),
                     page.body,
                     page.error,
+                    str(page.failure) if page.failure else None,
                     utcnow().isoformat(),
                 ),
             )
@@ -161,7 +198,7 @@ class Fetcher:
         if cached is not None:
             return cached
         if respect_robots and not await self.allowed(url):
-            page = Page(url=url, error="disallowed-by-robots")
+            page = Page(url=url, error="disallowed-by-robots", failure=Failure.ROBOTS)
             self._store_page(page, "raw")
             return page
         page = await self._raw_get(url)
@@ -176,12 +213,22 @@ class Fetcher:
         try:
             resp = await self._client.get(url)
         except httpx.HTTPError as exc:
-            return Page(url=url, error=f"{type(exc).__name__}: {exc}")
+            return Page(
+                url=url,
+                error=f"{type(exc).__name__}: {exc}",
+                failure=classify_exception(exc),
+            )
+        failure = None
+        if resp.status_code in (404, 410):
+            failure = Failure.NOT_FOUND
+        elif resp.status_code >= 400:
+            failure = Failure.HTTP_ERROR
         return Page(
             url=url,
             status=resp.status_code,
             headers={k.lower(): v for k, v in resp.headers.items()},
             body=resp.text,
+            failure=failure,
             final_url=str(resp.url),
             elapsed_ms=(time.monotonic() - started) * 1000,
         )
@@ -199,7 +246,7 @@ class Fetcher:
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            return Page(url=url, error="playwright-not-installed")
+            return Page(url=url, error="playwright-not-installed", failure=Failure.RENDER)
         try:
             async with async_playwright() as pw:
                 browser = await pw.chromium.launch()
@@ -217,6 +264,27 @@ class Fetcher:
                 )
                 await browser.close()
         except Exception as exc:  # noqa: BLE001 — браузер падает разнообразно
-            page = Page(url=url, error=f"render-failed: {exc}")
+            page = Page(url=url, error=f"render-failed: {exc}", failure=Failure.RENDER)
         self._store_page(page, "rendered")
         return page
+
+
+# Сообщение resolver-а различается между платформами, но подстроки устойчивы.
+_DNS_MARKERS = ("name or service not known", "nodename nor servname",
+                "temporary failure in name resolution", "no address associated")
+
+
+def classify_exception(exc: Exception) -> Failure:
+    """Отнести сетевую ошибку к виду отказа.
+
+    Отдельно выделяется ошибка резолвинга: это единственный сетевой сбой,
+    из которого действительно следует, что сайта по такому адресу нет.
+    """
+    if isinstance(exc, httpx.TimeoutException):
+        return Failure.TIMEOUT
+    text = str(exc).lower()
+    if isinstance(exc, httpx.ConnectError):
+        return Failure.DNS if any(m in text for m in _DNS_MARKERS) else Failure.CONNECT
+    if "certificate" in text or "ssl" in text or "tls" in text:
+        return Failure.TLS
+    return Failure.CONNECT

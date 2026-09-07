@@ -25,6 +25,11 @@ from prospektor.taxonomy import normalize_cuisine, osm_filters
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 
+# Теги, значение которых и есть категория заведения. Без них карточка,
+# найденная только в OSM, оставалась бы без вертикали и выпадала из любого
+# профильного скоринга.
+_CATEGORY_TAGS = ("amenity", "shop", "leisure", "tourism", "office", "healthcare", "craft")
+
 # Теги OSM -> поля нашей модели. Уверенность ниже, чем у реестра, но выше,
 # чем у эвристик с сайта: данные вносит человек, знающий это место.
 _TAG_FACTS: dict[str, tuple[str, float, bool]] = {
@@ -134,6 +139,12 @@ class OverpassSource(SourceAdapter):
             facts.append(
                 Fact(field="street", value=street, source="osm", confidence=0.8)
             )
+        for tag in _CATEGORY_TAGS:
+            if tags.get(tag):
+                facts.append(
+                    Fact(field="category_raw", value=tags[tag], source="osm", confidence=0.7)
+                )
+
         for cuisine in normalize_cuisine(tags.get("cuisine")):
             facts.append(Fact(field="cuisine", value=cuisine, source="osm", confidence=0.6))
 

@@ -21,7 +21,7 @@ PII_FIELDS = frozenset({"phone", "email"})
 _COLUMNS = [
     "name", "city", "street", "website", "phone", "email",
     "categories", "cuisines", "rating", "reviews_count",
-    "gap", "fit", "priority", "top_gaps", "id",
+    "gap", "fit", "priority", "coverage", "top_gaps", "id",
 ]
 
 

@@ -117,27 +117,42 @@ def enrich() -> None:
 
 @app.command()
 def audit(
+    profile: Annotated[str, typer.Option(help="Ограничить категориями профиля")] = "",
     limit: Annotated[int, typer.Option(help="Сколько карточек проверить")] = 0,
     render: Annotated[bool, typer.Option(help="Рендерить в браузере (проба js_dependent)")] = False,
     only_new: Annotated[bool, typer.Option(help="Пропускать уже проверенные")] = True,
+    explain: Annotated[bool, typer.Option(help="Показать, кто и почему отсеян")] = False,
 ) -> None:
-    """Загрузить сайты и прогнать пробы. Единственная стадия, которая ходит на чужие сайты."""
+    """Загрузить сайты и прогнать пробы. Единственная стадия, которая ходит на чужие сайты.
+
+    Обходятся не все карточки подряд, а отобранные кандидаты: сети, поштоматы,
+    банкоматы и школы отсеиваются до первого запроса.
+    """
+    import collections
+
     from prospektor.audit import audit_all
+    from prospektor.candidates import select
 
     store, settings = _store()
-    targets = []
-    for biz in store.iter_businesses():
-        if only_new and store.signals_for(biz.id):
-            continue
-        targets.append(biz)
-        if limit and len(targets) >= limit:
-            break
+    categories = [profile] if profile else None
+    targets, rejected = select(
+        store, categories=categories, limit=limit or None, skip_audited=only_new
+    )
+
+    reasons = collections.Counter(r.reason for r in rejected)
+    if reasons:
+        console.print("Отсеяно до аудита:")
+        for reason, count in reasons.most_common():
+            console.print(f"  {count:5}  {reason}")
+    if explain:
+        for r in rejected[:40]:
+            console.print(f"    [dim]{r.name[:44]:46} {r.reason}[/dim]")
 
     if not targets:
-        console.print("Нечего проверять — все карточки уже с сигналами.")
+        console.print("Кандидатов на проверку нет.")
         return
 
-    run = Run(id=_run_id("audit"), stage="audit")
+    run = Run(id=_run_id("audit"), stage="audit", profile=profile or None)
     store.start_run(run)
     console.print(f"К проверке: [bold]{len(targets)}[/bold], параллельно {settings.concurrency}")
 

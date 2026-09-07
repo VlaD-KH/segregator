@@ -92,3 +92,30 @@ def test_профиль_читается_с_весами_и_объяснения
     # без него досье превращается в список технических придирок.
     дорогие = [r for r in profile.rules if r.weight >= 8]
     assert дорогие and all(r.why for r in дорогие)
+
+
+def test_покрытие_отличает_оценку_по_двум_правилам_от_оценки_по_пятнадцати() -> None:
+    """Разрыв 100 по двум измеренным правилам — не то же самое, что по пятнадцати."""
+    profile = load_profile("beauty_pl")
+
+    почти_ничего = score_business(profile, биз(), {"web.platform_profile_only": True})
+    почти_всё = score_business(profile, биз(), {**ЦЕЛЫЙ, "web.has_site": False})
+
+    assert почти_ничего.coverage < 0.2
+    assert почти_всё.coverage > 0.5
+    assert почти_ничего.breakdown["coverage"] == почти_ничего.coverage
+
+
+def test_скоринг_профиля_не_трогает_чужую_вертикаль(store) -> None:
+    """Балл по правилам красоты, выставленный фотографу, не значит ничего."""
+    from prospektor.models import Business, Signal
+    from prospektor.scoring.engine import score_all
+
+    store.upsert_business(Business(id="salon", name="Studio", categories=["beauty_salon"]))
+    store.upsert_business(Business(id="foto", name="Fotograf", categories=["photographer"]))
+    for bid in ("salon", "foto"):
+        store.put_signals(bid, [Signal.flag("web.platform_profile_only", True)])
+
+    assert score_all(store, load_profile("beauty_pl")) == 1
+    row = store.conn.execute("SELECT business_id FROM scores").fetchone()
+    assert row["business_id"] == "salon"

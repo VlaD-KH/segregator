@@ -8,6 +8,10 @@
 свои права в `.claude/`, ноль импортов через границу в обе стороны. Граница проверяется
 тестом, а не договорённостью — см. `tests/test_isolation.py`.
 
+Подробная инструкция по запуску — [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+Результаты прогонов на живых городах — [`docs/RUN-SZCZECIN.md`](docs/RUN-SZCZECIN.md)
+и [`docs/RUN-STARGARD.md`](docs/RUN-STARGARD.md).
+
 ## Быстрый старт
 
 ```bash
@@ -16,11 +20,11 @@ python3.12 -m venv .venv
 .venv/bin/pip install -e '.[dev,xlsx,web]'
 .venv/bin/pytest                      # 143 теста, полностью офлайн
 
-.venv/bin/prospektor discover --area Kielce --profile horeca_pl
+.venv/bin/prospektor discover --area Szczecin --profile beauty_pl
 .venv/bin/prospektor enrich
-.venv/bin/prospektor audit
-.venv/bin/prospektor score
-.venv/bin/prospektor query horeca-bez-cyfrowych-zamowien --export xlsx
+.venv/bin/prospektor audit --profile beauty_pl --limit 200
+.venv/bin/prospektor score --profile beauty_pl
+.venv/bin/prospektor query beauty-tylko-platforma --profile beauty_pl --export xlsx
 .venv/bin/prospektor serve             # дашборд на http://127.0.0.1:8080
 ```
 
@@ -30,7 +34,7 @@ python3.12 -m venv .venv
 |---|---|---|
 | `discover` | ищет кандидатов по территории и категориям | карты и реестры |
 | `enrich` | пересобирает карточку из фактов, разрешая конфликты источников | никуда |
-| `audit` | грузит сайты и прогоняет пробы | сайты самих бизнесов |
+| `audit` | грузит сайты отобранных кандидатов и прогоняет пробы | сайты самих бизнесов |
 | `score` | считает `gap` / `fit` / `priority` по профилю | никуда |
 | `query` | фильтрует и выгружает CSV/XLSX | никуда |
 | `dossier` | собирает markdown-досье на один лид | никуда |
@@ -44,7 +48,7 @@ python3.12 -m venv .venv
 Пять групп сигналов. Полный каталог с формулировками для разговора с владельцем —
 в [`docs/SIGNALS.md`](docs/SIGNALS.md).
 
-- `web.*` — есть ли работающий сайт, или это заглушка / страница в соцсети / вёрстка 2019 года
+- `web.*` — есть ли работающий сайт, или это заглушка, профиль на чужой площадке, страница в соцсети, вёрстка 2019 года. Отдельно различаются «сайта нет» и «проверить не удалось»
 - `seo.*` — title, description, индексируемость, согласованность NAP между сайтом, картой и реестром
 - `aio.*` — читаемость для ИИ-агентов: JSON-LD, машиночитаемое меню, теги диет,
   допуск GPTBot/ClaudeBot/PerplexityBot, зависимость контента от JS
@@ -57,6 +61,9 @@ python3.12 -m venv .venv
 заведение с рейтингом 4.6 и 400 отзывами без сайта и заведение с 2.1 и пятью отзывами
 имеют **одинаковый** `gap` и совершенно разную ценность как лид.
 `priority` — геометрическое среднее, поэтому нулевой `fit` обнуляет приоритет.
+
+Рядом идёт `coverage` — доля правил профиля, которую удалось измерить: разрыв 100
+по двум правилам из девятнадцати и по пятнадцати — разные утверждения.
 
 Веса живут в `profiles/*.yaml` и калибруются на первых лидах. Ни одна цифра не приходит
 от модели: балл — сумма весов правил, правило ссылается на сигнал, сигнал на evidence

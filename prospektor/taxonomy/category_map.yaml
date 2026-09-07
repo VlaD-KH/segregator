@@ -1,75 +1,129 @@
 # Канонические категории prospektor -> теги OSM и типы Overture.
-# Один слой отображения: смена источника не должна ломать профили и запросы.
+#
+# Значения Overture выверены по фактическим данным Щецина и Старгарда
+# (релиз 2026-08-19.0), а не выписаны по догадке: первая версия этого файла
+# промахнулась мимо половины заведений — в данных лежит `doner_kebab`, а не
+# `kebab_restaurant`, и `beauty_and_spa`, который вообще встречается только
+# в поле `categories.alternate`.
 
 categories:
+  # --- HoReCa ---------------------------------------------------------
   restauracja:
     aliases: [restaurant, ресторан]
     osm: ["amenity=restaurant"]
-    overture: [restaurant, fine_dining_restaurant]
+    overture: [restaurant, fine_dining_restaurant, bar_and_grill_restaurant, gastropub,
+               polish_restaurant, eastern_european_restaurant, soup_restaurant,
+               family_style_restaurant, buffet]
   pizzeria:
     aliases: [pizza, пиццерия]
     osm: ["amenity=restaurant][cuisine~pizza"]
-    overture: [pizza_restaurant]
+    overture: [pizza_restaurant, italian_restaurant]
   sushi:
-    aliases: [суши, japanese]
+    aliases: [суши, japanese, японская]
     osm: ["amenity=restaurant][cuisine~sushi|japanese"]
-    overture: [sushi_restaurant, japanese_restaurant]
+    overture: [sushi_restaurant, japanese_restaurant, ramen_restaurant, asian_restaurant,
+               chinese_restaurant, vietnamese_restaurant, thai_restaurant, korean_restaurant]
   kebab:
-    aliases: [кебаб, fast_food]
+    aliases: [кебаб, fast_food, fastfood]
     osm: ["amenity=fast_food"]
-    overture: [fast_food_restaurant, kebab_restaurant]
+    overture: [doner_kebab, kebab_restaurant, turkish_restaurant, fast_food_restaurant]
   burger:
     aliases: [бургерная]
     osm: ["amenity=fast_food][cuisine~burger"]
-    overture: [burger_restaurant]
+    overture: [burger_restaurant, american_restaurant]
   kawiarnia:
     aliases: [cafe, кофейня]
     osm: ["amenity=cafe"]
-    overture: [cafe, coffee_shop]
+    overture: [cafe, coffee_shop, breakfast_and_brunch_restaurant, tea_room]
   cukiernia:
-    aliases: [кондитерская, pastry]
+    aliases: [кондитерская, pastry, lodziarnia]
     osm: ["shop=pastry", "shop=confectionery"]
-    overture: [bakery, dessert_shop]
+    overture: [bakery, dessert_shop, ice_cream_shop, donut_shop, chocolatier]
   bar:
-    aliases: [pub, бар]
+    aliases: [pub, паб]
     osm: ["amenity=bar", "amenity=pub"]
-    overture: [bar, pub]
+    overture: [bar, pub, cocktail_bar, wine_bar, beer_bar, brewery]
+  catering:
+    aliases: [кейтеринг, dieta]
+    osm: ["amenity=restaurant][cuisine~catering"]
+    overture: [caterer, food_court, personal_chef]
   hotel:
     aliases: [отель, zakwaterowanie]
     osm: ["tourism=hotel", "tourism=guest_house", "tourism=hostel"]
-    overture: [hotel, hostel, guest_house]
+    overture: [hotel, hostel, guest_house, bed_and_breakfast, motel, resort]
+
+  # --- Красота: пилотная вертикаль ------------------------------------
+  # Порядок значений важен только для читаемости; поиск идёт и по primary,
+  # и по alternate, поэтому зонтичный beauty_and_spa указан явно.
   fryzjer:
-    aliases: [barber, парикмахерская]
+    aliases: [hair, парикмахерская, hairdresser]
     osm: ["shop=hairdresser"]
-    overture: [hair_salon, barber]
+    overture: [hair_salon, hair_stylist, hair_extensions, hair_replacement, hair_supply_stores]
+  barber:
+    aliases: [барбершоп, barbershop]
+    osm: ["shop=hairdresser][male=yes"]
+    overture: [barber]
   kosmetyczka:
-    aliases: [beauty, салон красоты]
+    aliases: [beauty, косметолог, kosmetolog, salon urody]
     osm: ["shop=beauty"]
-    overture: [beauty_salon, nail_salon]
+    overture: [beauty_salon, beauty_and_spa, skin_care, cosmetic_and_beauty_supplies,
+               makeup_artist, permanent_makeup, beauty_product_supplier, medical_spa]
+  paznokcie:
+    aliases: [nails, ногти, manicure]
+    osm: ["shop=beauty][beauty=nails"]
+    overture: [nail_salon]
+  spa:
+    aliases: [спа, wellness]
+    osm: ["leisure=spa", "shop=massage"]
+    overture: [spas, health_spa, day_spa, tanning_salon]
+  masaz:
+    aliases: [massage, массаж]
+    osm: ["shop=massage"]
+    overture: [massage, massage_therapy]
+  depilacja:
+    aliases: [эпиляция, waxing]
+    osm: ["shop=beauty][beauty=hair_removal"]
+    overture: [hair_removal, laser_hair_removal, waxing]
+  tatuaz:
+    aliases: [tattoo, тату]
+    osm: ["shop=tattoo"]
+    overture: [tattoo_and_piercing, tattoo, piercing]
+  rzesy:
+    aliases: [lashes, ресницы, brwi]
+    osm: ["shop=beauty][beauty=eyelash"]
+    overture: [eyelash_service]
+
+  # --- Прочие вертикали -----------------------------------------------
   silownia:
     aliases: [fitness, спортзал]
     osm: ["leisure=fitness_centre"]
-    overture: [gym, fitness_center]
+    overture: [gym, fitness_center, personal_trainer, yoga_studio, pilates_studio]
   warsztat_samochodowy:
-    aliases: [сто, car_repair]
+    aliases: [сто, car_repair, mechanik]
     osm: ["shop=car_repair"]
-    overture: [auto_repair]
+    overture: [automotive_repair, auto_repair, oil_change_service, tires, car_wash,
+               auto_detailing, body_shop]
   stomatolog:
     aliases: [dentist, стоматология]
     osm: ["amenity=dentist", "healthcare=dentist"]
-    overture: [dentist]
+    overture: [dentist, cosmetic_dentist, orthodontist, dental_hygienist]
+  fizjoterapia:
+    aliases: [физиотерапия, rehabilitacja]
+    osm: ["healthcare=physiotherapist"]
+    overture: [physical_therapy, physiotherapist, chiropractor]
   weterynarz:
     aliases: [vet, ветклиника]
     osm: ["amenity=veterinary"]
-    overture: [veterinarian]
+    overture: [veterinarian, pet_groomer, pet_boarding]
   biuro_rachunkowe:
     aliases: [accountant, бухгалтерия]
     osm: ["office=accountant"]
-    overture: [accounting_service]
+    overture: [accounting_service, tax_service, bookkeeper]
 
-# Наборы категорий под профили. discover --profile horeca_pl берёт этот набор.
+# Наборы категорий под профили: discover --profile берёт отсюда.
 sets:
-  horeca_pl: [restauracja, pizzeria, sushi, kebab, burger, kawiarnia, cukiernia, bar]
-  beauty_pl: [fryzjer, kosmetyczka]
+  beauty_pl: [fryzjer, barber, kosmetyczka, paznokcie, spa, masaz, depilacja, tatuaz, rzesy]
+  horeca_pl: [restauracja, pizzeria, sushi, kebab, burger, kawiarnia, cukiernia, bar, catering]
   auto_pl: [warsztat_samochodowy]
-  health_pl: [stomatolog, weterynarz]
+  health_pl: [stomatolog, fizjoterapia, weterynarz]
+  fitness_pl: [silownia]
