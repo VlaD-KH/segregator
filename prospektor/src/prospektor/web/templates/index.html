@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block subtitle %}профиль {{ profile.label }} · найдено {{ rows|length }}{% endblock %}
+{% block content %}
+<form class="filters" method="get">
+  <input type="search" name="q" placeholder="Название" value="{{ params.get('q','') }}">
+  <select name="city">
+    <option value="">Все города</option>
+    {% for city in cities %}
+      <option value="{{ city }}" {% if params.get('city') == city %}selected{% endif %}>{{ city }}</option>
+    {% endfor %}
+  </select>
+  {% for key, label in facets %}
+    <select name="{{ key }}">
+      <option value="">{{ label }}: любое</option>
+      <option value="1" {% if params.get(key) == '1' %}selected{% endif %}>{{ label }}: да</option>
+      <option value="0" {% if params.get(key) == '0' %}selected{% endif %}>{{ label }}: нет</option>
+    </select>
+  {% endfor %}
+  <button type="submit">Фильтровать</button>
+  <a href="/">сбросить</a>
+</form>
+
+<div class="wrap">
+<table>
+  <thead>
+    <tr>
+      <th>Заведение</th><th>Город</th>
+      <th class="num">Разрыв</th><th class="num">Потенциал</th><th class="num">Приоритет</th>
+      <th class="num">Измерено</th>
+      <th class="num">Отзывы</th><th class="num">Рейтинг</th>
+      <th>Главная дыра</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td><a href="/lead/{{ row.id }}">{{ row.name }}</a></td>
+      <td>{{ row.city or '—' }}</td>
+      <td class="num gap">{{ '%.0f'|format(row.gap or 0) }}</td>
+      <td class="num fit">{{ '%.0f'|format(row.fit or 0) }}</td>
+      <td class="num">{{ '%.0f'|format(row.priority or 0) }}</td>
+      <td class="num {% if (row.coverage or 0) < 0.5 %}gap{% endif %}">{{ '%.0f'|format((row.coverage or 0) * 100) }}%</td>
+      <td class="num">{{ row.reviews_count or '—' }}</td>
+      <td class="num">{{ row.rating or '—' }}</td>
+      <td class="why">{{ row.top_gap }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="9">Пусто. Соберите данные: <code>prospektor discover</code>, затем <code>audit</code> и <code>score</code>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

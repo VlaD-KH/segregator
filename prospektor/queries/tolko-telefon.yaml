@@ -1,0 +1,8 @@
+# Единственный способ сделать заказ — позвонить в рабочие часы.
+name: tolko-telefon
+profile: horeca_pl
+where:
+  - country: PL
+  - ops.phone_only: true
+  - rep.has_traction: true
+order_by: priority desc

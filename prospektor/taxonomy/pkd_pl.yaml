@@ -1,0 +1,149 @@
+# Каталог направлений МСБ польского города 100–200 тыс. жителей.
+# Извлечён из присланного исследования (секции PKD, польские отраслевые термины)
+# и служит двум вещам: словарём категорий для discover и источником поисковых
+# запросов/тегов OSM. Доли (share_firms) — из того же исследования, используются
+# только как ориентир объёма выборки, в скоринг не входят.
+
+sections:
+  G:
+    label_pl: Handel hurtowy i detaliczny, naprawa pojazdów
+    label_ru: Торговля и авторемонт
+    share_firms: 19.5
+    groups:
+      - pkd: "46"
+        label_pl: Handel hurtowy
+        types: [hurtownia budowlana, hurtownia elektryczna, hurtownia spożywcza, dystrybucja opakowań]
+      - pkd: "47"
+        label_pl: Handel detaliczny
+        types: [sklep mięsny, piekarnia, sklep zoologiczny, optyk, kwiaciarnia, sklep meblowy, second hand]
+      - pkd: "45"
+        label_pl: Motoryzacja
+        types: [warsztat samochodowy, wulkanizacja, blacharstwo i lakiernictwo, sklep z częściami, myjnia bezdotykowa, komis samochodowy]
+  F:
+    label_pl: Budownictwo
+    label_ru: Строительство
+    share_firms: 15.5
+    groups:
+      - pkd: "41"
+        label_pl: Budownictwo mieszkaniowe
+        types: [deweloper, domy pod klucz, szeregowce]
+      - pkd: "43.2"
+        label_pl: Instalacje
+        types: [elektryk, hydraulik, pompy ciepła, HVAC, fotowoltaika]
+      - pkd: "43.3"
+        label_pl: Wykończenia
+        types: [malarz, glazurnik, dekarz, termomodernizacja]
+      - pkd: "42"
+        label_pl: Infrastruktura
+        types: [brukarstwo, roboty ziemne, asfaltowanie]
+  C:
+    label_pl: Przetwórstwo przemysłowe
+    label_ru: Обрабатывающая промышленность
+    share_firms: 9.0
+    groups:
+      - pkd: "10"
+        label_pl: Przemysł spożywczy
+        types: [piekarnia przemysłowa, masarnia, serowarnia, browar rzemieślniczy]
+      - pkd: "25"
+        label_pl: Metal
+        types: [obróbka CNC, spawalnia, konstrukcje stalowe, ogrodzenia]
+      - pkd: "16,31"
+        label_pl: Drewno i meble
+        types: [tartak, stolarnia, producent mebli, okna i drzwi, palety]
+      - pkd: "18,20,22"
+        label_pl: Chemia, tworzywa, poligrafia
+        types: [opakowania z tworzyw, drukarnia, tektura falista]
+  H:
+    label_pl: Transport i gospodarka magazynowa
+    label_ru: Транспорт и логистика
+    share_firms: 7.0
+    groups:
+      - pkd: "49.4"
+        label_pl: Transport drogowy towarów
+        types: [transport międzynarodowy, wywrotki]
+      - pkd: "52"
+        label_pl: Magazynowanie i spedycja
+        types: [spedycja, magazyn, self-storage]
+      - pkd: "49.3,53"
+        label_pl: Przewóz osób i kurierzy
+        types: [taxi, przewóz osób, kurier, paczkomaty]
+  I:
+    label_pl: Zakwaterowanie i gastronomia
+    label_ru: HoReCa
+    share_firms: 4.5
+    # Пилотная вертикаль. Расписана подробнее остальных: здесь сигналы
+    # aio.* и ops.* дают самый чистый сигнал о разрыве.
+    groups:
+      - pkd: "56"
+        label_pl: Gastronomia
+        types:
+          - restauracja
+          - pizzeria
+          - sushi
+          - kebab
+          - burger
+          - bar mleczny
+          - kawiarnia
+          - cukiernia
+          - dom weselny
+          - catering
+          - dieta pudełkowa
+      - pkd: "55"
+        label_pl: Zakwaterowanie
+        types: [hotel, apartamenty, motel, hostel]
+  M-N:
+    label_pl: Działalność profesjonalna i administracyjna
+    label_ru: Профессиональные и административные услуги
+    share_firms: 19.5
+    groups:
+      - pkd: "69"
+        label_pl: Rachunkowość i prawo
+        types: [biuro rachunkowe, kancelaria prawna, notariusz]
+      - pkd: "71"
+        label_pl: Architektura i inżynieria
+        types: [architekt, geodeta, nadzór budowlany]
+      - pkd: "73,74"
+        label_pl: Marketing i design
+        types: [agencja reklamowa, studio graficzne, reklama zewnętrzna]
+      - pkd: "78,80,81"
+        label_pl: Kadry i obsługa
+        types: [agencja pracy, ochrona, sprzątanie, wynajem sprzętu]
+  J:
+    label_pl: Informacja i komunikacja
+    label_ru: IT и связь
+    share_firms: 4.5
+    groups:
+      - pkd: "62"
+        label_pl: IT
+        types: [software house, serwis komputerowy, wdrożenia ERP]
+      - pkd: "95.1"
+        label_pl: Naprawa sprzętu
+        types: [serwis telefonów, regeneracja tonerów]
+  Q:
+    label_pl: Opieka zdrowotna
+    label_ru: Здравоохранение и ветеринария
+    share_firms: 9.5
+    groups:
+      - pkd: "86"
+        label_pl: Medycyna prywatna
+        types: [stomatolog, fizjoterapia, gabinet lekarski, diagnostyka]
+      - pkd: "75,87"
+        label_pl: Weterynaria i opieka
+        types: [weterynarz, grooming, dom opieki]
+  P-R-S:
+    label_pl: Edukacja, sport, usługi osobiste
+    label_ru: Образование, спорт, быт
+    share_firms: 11.0
+    groups:
+      - pkd: "85"
+        label_pl: Edukacja
+        types: [żłobek, przedszkole, szkoła językowa, ośrodek szkolenia kierowców, korepetycje]
+      - pkd: "96.02"
+        label_pl: Uroda
+        types: [fryzjer, barber, paznokcie, kosmetyczka, masaż, tatuaż]
+      - pkd: "93.1"
+        label_pl: Sport
+        types: [siłownia, fitness, padel, sztuki walki]
+      - pkd: "95.2,96.01"
+        label_pl: Usługi bytowe
+        types: [krawiec, szewc, pralnia, dorabianie kluczy]

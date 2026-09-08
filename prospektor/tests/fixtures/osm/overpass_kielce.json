@@ -1,0 +1,32 @@
+{
+  "version": 0.6,
+  "elements": [
+    {
+      "type": "node", "id": 1001, "lat": 50.8661, "lon": 20.6286,
+      "tags": {
+        "amenity": "restaurant", "name": "Wok & Roll",
+        "cuisine": "sushi;japanese;asian",
+        "website": "https://wokandroll.example.pl",
+        "phone": "+48 12 345 67 89",
+        "addr:street": "Piłsudskiego", "addr:housenumber": "15",
+        "addr:city": "Kielce", "addr:postcode": "25-001",
+        "opening_hours": "Mo-Su 11:00-23:00",
+        "delivery": "yes", "takeaway": "yes"
+      }
+    },
+    {
+      "type": "way", "id": 2002, "center": {"lat": 50.8702, "lon": 20.6301},
+      "tags": {
+        "amenity": "cafe", "name": "Ziarno",
+        "cuisine": "coffee_shop",
+        "contact:phone": "411112233",
+        "contact:website": "https://ziarno.example.pl",
+        "addr:city": "Kielce"
+      }
+    },
+    {
+      "type": "node", "id": 3003, "lat": 50.8600, "lon": 20.6200,
+      "tags": {"amenity": "restaurant", "cuisine": "pizza"}
+    }
+  ]
+}

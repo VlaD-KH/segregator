@@ -1,0 +1,15 @@
+# Заведения, которых для ИИ-ассистентов не существует: нет разметки,
+# либо закрыты ИИ-роботы, либо контент виден только после JS.
+# Разовый тематический срез — пример того, что фильтр это файл, а не код.
+name: nevidimye-dlya-ii
+profile: horeca_pl
+where:
+  - country: PL
+  - rep.reviews_count: {gte: 50}
+  - any_of:
+      - aio.localbusiness_schema: false
+      - aio.ai_crawlers_allowed: false
+      - aio.js_dependent: true
+      - aio.jsonld_broken: true
+order_by: gap desc
+limit: 200

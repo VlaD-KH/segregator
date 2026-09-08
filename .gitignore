@@ -18,3 +18,11 @@ ChatExport_*/
 messages*.html
 probe/probe_result_html.txt
 !tests/fixtures/**/messages*.html
+
+# prospektor — изолированный модуль поиска бизнесов (свой venv, своя база, свои выгрузки)
+prospektor/.venv/
+prospektor/data/
+prospektor/exports/
+prospektor/cache/
+prospektor/.ruff_cache/
+prospektor/.mypy_cache/

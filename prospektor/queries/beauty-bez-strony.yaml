@@ -1,0 +1,9 @@
+# Салоны вообще без сайта — самая крупная группа вертикали.
+name: beauty-bez-strony
+profile: beauty_pl
+where:
+  - country: PL
+  - web.has_site: false
+  - rep.contactable: true
+order_by: priority desc
+limit: 300
