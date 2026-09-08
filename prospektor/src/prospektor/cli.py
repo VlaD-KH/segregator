@@ -268,6 +268,58 @@ def stats() -> None:
 
 
 @app.command()
+def doctor(
+    limit: Annotated[int, typer.Option(help="Сколько подозрительных склеек показать")] = 30,
+    strict: Annotated[
+        bool, typer.Option(help="Только случаи с разными улицами — самые сомнительные")
+    ] = False,
+) -> None:
+    """Проверить качество данных: склейки, которые стоит посмотреть глазами.
+
+    Дедупликация работает по имени и близости, и для сетевых точек требует
+    совпадения адреса. Но два независимых заведения с одинаковым названием в
+    радиусе 150 метров она всё ещё склеит. Отличить такой случай от дубликата
+    одного бизнеса в разных источниках автоматически нельзя — поэтому список
+    выносится человеку.
+    """
+    from prospektor.candidates import suspect_merges
+
+    store, _ = _store()
+    подозрительные = suspect_merges(store, limit=limit, only_different_streets=strict)
+    if not подозрительные:
+        console.print("[green]Карточек с несколькими адресами нет[/green]")
+        return
+
+    console.print(
+        f"Карточек, собранных из записей с разными адресами: [bold]{len(подозрительные)}[/bold]"
+    )
+    разные_улицы = sum(1 for s in подозрительные if s.different_streets)
+    console.print(
+        f"  из них с разными улицами: [bold]{разные_улицы}[/bold] — "
+        "остальные, скорее всего, дубликаты одной записи"
+    )
+
+    table = Table(show_lines=True)
+    table.add_column("Заведение")
+    table.add_column("Адреса в фактах")
+    table.add_column("Улиц")
+    table.add_column("id")
+    for item in подозрительные:
+        table.add_row(
+            item.name[:34],
+            "\n".join(a[:44] for a in item.addresses[:4]),
+            f"[red]{len(item.streets)}[/red]" if item.different_streets else "1",
+            item.business_id[:12],
+        )
+    console.print(table)
+    console.print(
+        "[dim]Один и тот же адрес с разными квартирами — обычно дубликаты одного "
+        "заведения, склейка верна. Разные улицы — либо переезд, который Overture "
+        "не забыл, либо два бизнеса с одним названием.[/dim]"
+    )
+
+
+@app.command()
 def purge(
     older_than: Annotated[
         int, typer.Option(help="Удалить собранное раньше, чем N дней назад")

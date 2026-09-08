@@ -131,3 +131,100 @@ def select(
     # а значит и более обоснованную оценку.
     chosen.sort(key=lambda b: (b.website is None, b.name))
     return (chosen[:limit] if limit else chosen), rejected
+
+
+# Приставка типа улицы. Снимается, чтобы «al. Wojska Polskiego» и
+# «Wojska Polskiego» считались одной улицей.
+_ADDRESS_NOISE = re.compile(
+    r"^\s*(?:ul\.|ulica|al\.|aleja|aleje|pl\.|plac|os\.|osiedle)\s+", re.IGNORECASE
+)
+
+
+def street_name(address: str) -> str:
+    """Имя улицы без номера дома и всего, что за ним.
+
+    Резать по одному лишь хвостовому номеру недостаточно: в данных Overture за
+    номером тянется «3 piętro», «lokal 106», «pawilon 73». Поэтому отбрасывается
+    всё, начиная с первого токена, который начинается с цифры.
+
+    Исключение — улицы, чьё название само начинается с числа («1 Maja»): если
+    после отсечения ничего не осталось, берётся адрес целиком.
+    """
+    cleaned = _ADDRESS_NOISE.sub("", address or "")
+    tokens = cleaned.split()
+    head = []
+    for token in tokens:
+        if token[:1].isdigit():
+            break
+        head.append(token)
+    return slug_name(" ".join(head)) or slug_name(cleaned)
+
+
+@dataclass
+class SuspectMerge:
+    """Карточка, собранная из записей с разными адресами.
+
+    Чаще всего это дубликаты одного бизнеса из разных источников Overture, и
+    склейка верна: «Wojska Polskiego 11/4» и «Wojska Polskiego 13A/2» — одно и
+    то же место, записанное по-разному. Настоящий повод для подозрений — когда
+    улицы разные: либо заведение переезжало и Overture хранит старую запись,
+    либо это два разных бизнеса с одинаковым названием.
+
+    Отличить одно от другого автоматически нельзя, поэтому список выносится
+    человеку — но отсортированным так, чтобы сомнительное было сверху.
+    """
+
+    business_id: str
+    name: str
+    addresses: list[str]
+    sources: list[str]
+
+    @property
+    def streets(self) -> set[str]:
+        return {s for s in (street_name(a) for a in self.addresses) if s}
+
+    @property
+    def different_streets(self) -> bool:
+        """Разные улицы — вот это стоит смотреть в первую очередь."""
+        return len(self.streets) > 1
+
+
+def suspect_merges(
+    store: Store, limit: int = 50, only_different_streets: bool = False
+) -> list[SuspectMerge]:
+    """Склейки, которые стоит проверить глазами. Сомнительные — первыми."""
+    rows = store.conn.execute(
+        """
+        SELECT business_id, COUNT(DISTINCT value) AS variants
+        FROM facts WHERE field = 'street'
+        GROUP BY business_id HAVING variants > 1
+        ORDER BY variants DESC LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+    out: list[SuspectMerge] = []
+    for row in rows:
+        biz = store.get_business(row["business_id"])
+        if biz is None:  # pragma: no cover — карточка удалена между запросами
+            continue
+        addresses = [
+            r["value"]
+            for r in store.conn.execute(
+                "SELECT DISTINCT value FROM facts WHERE business_id = ? AND field = 'street'",
+                (biz.id,),
+            )
+        ]
+        out.append(
+            SuspectMerge(
+                business_id=biz.id,
+                name=biz.name,
+                addresses=addresses,
+                sources=sorted(biz.refs),
+            )
+        )
+
+    if only_different_streets:
+        out = [s for s in out if s.different_streets]
+    out.sort(key=lambda s: (not s.different_streets, -len(s.streets), s.name))
+    return out

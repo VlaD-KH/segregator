@@ -22,7 +22,8 @@ REPO_ROOT = MODULE_ROOT.parent
 # из самого пакета, — нарушение границы.
 DECLARED = {
     "pydantic", "pydantic_settings", "httpx", "typer", "structlog", "rich", "yaml",
-    "duckdb", "openpyxl", "playwright", "fastapi", "uvicorn", "jinja2", "pytest", "respx",
+    "duckdb", "pyarrow", "openpyxl", "playwright", "fastapi", "uvicorn", "jinja2",
+    "pytest", "respx",
 }
 
 

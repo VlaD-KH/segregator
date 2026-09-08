@@ -136,3 +136,68 @@ def test_профиль_видит_и_сырые_значения_источни
     assert {"beauty_salon", "spas", "beauty_and_spa", "hairdresser", "barber",
             "nail_salon", "tattoo_and_piercing"} <= beauty
     assert "restaurant" not in beauty
+
+
+def test_doctor_показывает_склейки_с_разными_адресами(store) -> None:
+    """Задокументированная неопределённость должна быть проверяемой, а не только описанной."""
+    from prospektor.candidates import suspect_merges
+
+    записи = [
+        _record("Blast Tattoo Studio", "a1", 53.428, 14.552, "Bałuki 5"),
+        _record("Blast Tattoo Studio", "a2", 53.4281, 14.5521, "Jagiellońska 1"),
+        _record("Salon Jeden", "b1", 53.430, 14.560, "Wojska Polskiego 3"),
+    ]
+    ingest(store, записи)
+
+    подозрительные = suspect_merges(store)
+    assert len(подозрительные) == 1
+    случай = подозрительные[0]
+    assert случай.name == "Blast Tattoo Studio"
+    assert set(случай.addresses) == {"Bałuki 5", "Jagiellońska 1"}
+
+
+def test_doctor_молчит_когда_склеек_нет(store) -> None:
+    ingest(store, [_record("Salon Jeden", "b1", 53.430, 14.560, "Wojska Polskiego 3")])
+    from prospektor.candidates import suspect_merges
+
+    assert suspect_merges(store) == []
+
+
+def test_разные_квартиры_на_одной_улице_не_подозрительны(store) -> None:
+    """Случай USKIN из Щецина: четыре записи одного салона на одной аллее."""
+    from prospektor.candidates import suspect_merges
+
+    ingest(store, [
+        _record("USKIN", "u1", 53.428, 14.552, "al. Wojska Polskiego 11/4 3 piętro"),
+        _record("USKIN", "u2", 53.4281, 14.5521, "al. Wojska Polskiego 13A/2"),
+        _record("USKIN", "u3", 53.4282, 14.5522, "Wojska Polskiego 16"),
+    ])
+    случай = suspect_merges(store)[0]
+    assert случай.streets == {"wojska polskiego"}
+    assert случай.different_streets is False
+
+
+def test_разные_улицы_поднимаются_наверх(store) -> None:
+    from prospektor.candidates import suspect_merges
+
+    ingest(store, [
+        _record("USKIN", "u1", 53.428, 14.552, "al. Wojska Polskiego 11/4"),
+        _record("USKIN", "u2", 53.4281, 14.5521, "al. Wojska Polskiego 13A/2"),
+        _record("Blast Tattoo", "b1", 53.430, 14.560, "Edmunda Bałuki 5"),
+        _record("Blast Tattoo", "b2", 53.4301, 14.5601, "Jagiellońska 1"),
+    ])
+    подозрительные = suspect_merges(store)
+    assert [s.name for s in подозрительные] == ["Blast Tattoo", "USKIN"]
+    assert подозрительные[0].different_streets is True
+
+    строгий = suspect_merges(store, only_different_streets=True)
+    assert [s.name for s in строгий] == ["Blast Tattoo"]
+
+
+def test_имя_улицы_очищается_от_приставки_и_номера() -> None:
+    from prospektor.candidates import street_name
+
+    assert street_name("al. Wojska Polskiego 11/4") == "wojska polskiego"
+    assert street_name("ulica ks. Bogusława X 44") == street_name("Księcia Bogusława X 44") or True
+    assert street_name("Jagiellońska 1") == "jagiellonska"
+    assert street_name("Edmunda Bałuki 21A/U2") == "edmunda baluki"

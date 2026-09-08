@@ -66,7 +66,7 @@ def create_app(profile_name: str = "horeca_pl") -> FastAPI:
                     "AND s.key = ? AND s.value_bool = ?)"
                 )
         sql = f"""
-            SELECT b.*, sc.gap, sc.fit, sc.priority, sc.breakdown
+            SELECT b.*, sc.gap, sc.fit, sc.priority, sc.coverage, sc.breakdown
             FROM businesses b
             LEFT JOIN scores sc ON sc.business_id = b.id AND sc.profile = ?
             WHERE {' AND '.join(where)}
@@ -109,7 +109,7 @@ def create_app(profile_name: str = "horeca_pl") -> FastAPI:
         только то, что ещё ни разу не оценивалось.
         """
         row = store.conn.execute(
-            "SELECT gap, fit, priority, reachable, breakdown FROM scores "
+            "SELECT gap, fit, priority, reachable, coverage, breakdown FROM scores "
             "WHERE business_id = ? AND profile = ?",
             (business_id, profile.name),
         ).fetchone()
@@ -120,6 +120,7 @@ def create_app(profile_name: str = "horeca_pl") -> FastAPI:
             fit=row["fit"],
             priority=row["priority"],
             reachable=bool(row["reachable"]),
+            coverage=row["coverage"],
             breakdown=json.loads(row["breakdown"] or "{}"),
         )
 

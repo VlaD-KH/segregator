@@ -105,6 +105,10 @@ def render_dossier(
         f"**Приоритет {scored.priority:.0f}**"
     )
     lines.append("")
+    # Покрытие идёт рядом с баллом, а не в примечании: без него «разрыв 100»
+    # читается как приговор, хотя может опираться на два правила из девятнадцати.
+    lines.append(_coverage_note(scored.coverage))
+    lines.append("")
 
     contacts = []
     if biz.website:
@@ -165,6 +169,21 @@ def render_dossier(
         "за человеком: модуль готовит файл, связывается человек._"
     )
     return "\n".join(lines)
+
+
+# Порог, ниже которого оценка держится на слишком малом числе измерений
+LOW_COVERAGE = 0.5
+
+
+def _coverage_note(coverage: float) -> str:
+    """Одна строка о том, насколько оценке можно верить."""
+    percent = round(coverage * 100)
+    if coverage >= LOW_COVERAGE:
+        return f"Измерено правил профиля: {percent}% веса."
+    return (
+        f"⚠ Измерено правил профиля: всего {percent}% веса — оценка предварительная. "
+        "Аудит сайта по этой карточке не проводился или не удался."
+    )
 
 
 def _context_notes(signals: dict[str, Any]) -> list[str]:
